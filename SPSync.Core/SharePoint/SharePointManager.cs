@@ -167,11 +167,12 @@ namespace SPSync.Core
             {
                 var web = context.Web;
                 context.Load(web);
-                var list = context.Web.Lists.GetByTitle(configuration.DocumentLibrary);
-                context.Load(list, p => p.RootFolder.ServerRelativeUrl, p => p.RootFolder.Name, p => p.RootFolder.Folders);
+                var rootFolder = GetRootFolder(configuration,context);
+                context.Load(rootFolder, p => p.ServerRelativeUrl, p => p.Name, p => p.Folders);
                 context.ExecuteQuery();
+                
 
-                var subFolderList = GetAllFoldersInternal(context, list.RootFolder);
+                var subFolderList = GetAllFoldersInternal(context, rootFolder);
                 subFolderList.ForEach(f =>
                 {
                     var folder = f;
@@ -211,18 +212,23 @@ namespace SPSync.Core
         {
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                var list = context.Web.Lists.GetByTitle(GetDocLib());
                 var item = list.GetItemById(id);
                 item.Recycle();
                 context.ExecuteQuery();
             }
         }
 
+        private string GetDocLib()
+        {
+            return _configuration.DocumentLibrary.Split(new []{'/'},StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        }
+
         internal void RenameItem(int id, string newName)
         {
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                var list = context.Web.Lists.GetByTitle(GetDocLib());
                 var item = list.GetItemById(id);
                 item["FileLeafRef"] = newName;
                 item.Update();
@@ -240,7 +246,7 @@ namespace SPSync.Core
 
                 using (var context = GetClientContext())
                 {
-                    var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                    var list = context.Web.Lists.GetByTitle(GetDocLib());
                     context.Load(list, p => p.DefaultViewUrl);
 
                     var changeQuery = new ChangeQuery();
@@ -277,7 +283,7 @@ namespace SPSync.Core
 
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                var list = context.Web.Lists.GetByTitle(GetDocLib());
                 context.Load(list, p => p.DefaultViewUrl);
 
                 var changeQuery = new ChangeQuery();
@@ -421,15 +427,23 @@ namespace SPSync.Core
 
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
-                context.Load(list, p => p.RootFolder.Files, p => p.RootFolder.Folders, p => p.RootFolder.Files.Include(f => f.ListItemAllFields.Id));
-                context.ExecuteQuery();
-
-                var subFileList = DownloadFileNameListInternal(context, list.RootFolder, ".\\");
+                var rootFolder = GetRootFolder(_configuration,context);
+                var subFileList = DownloadFileNameListInternal(context, rootFolder, ".\\");
                 fileList.AddRange(subFileList);
             }
 
             return fileList;
+        }
+
+        private static Folder GetRootFolder(SyncConfiguration configuration, ClientContext context)
+        {
+            //var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+            //context.Load(list, p => p.RootFolder.Files, p => p.RootFolder.Folders, p => p.RootFolder.Files.Include(f => f.ListItemAllFields.Id));
+            //context.ExecuteQuery();
+            var rootFolder = context.Web.GetFolderByServerRelativeUrl(configuration.DocumentLibrary);
+            context.Load(rootFolder, p => p.Files, p => p.Folders, p => p.Files.Include(f => f.ListItemAllFields.Id));
+            context.ExecuteQuery();
+            return rootFolder;
         }
 
         private List<SharePointItem> DownloadFileNameListInternal(ClientContext context, Folder folder, string folderFullPath)
@@ -517,12 +531,16 @@ namespace SPSync.Core
             {
                 var web = context.Web;
                 context.Load(web);
-                var list = web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                var list = web.Lists.GetByTitle(GetDocLib());
                 context.Load(list, p => p.DefaultViewUrl);
                 context.ExecuteQuery();
 
                 string url = list.DefaultViewUrl.Substring(0, list.DefaultViewUrl.IndexOf("/Forms/"));
                 url = url.EndsWith("/") ? url + relativeFilename : url + "/" + relativeFilename;
+
+                var u2 = Path.Combine(_configuration.DocumentLibrary, relativeFilename);
+                url = _configuration.DocumentLibrary + "/" + relativeFilename;
+
                 return url;
             }
         }
@@ -538,7 +556,7 @@ namespace SPSync.Core
         {
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                var list = context.Web.Lists.GetByTitle(GetDocLib());
                 context.Load(list, l => l.DefaultViewUrl);
                 context.ExecuteQuery();
 
@@ -593,9 +611,9 @@ namespace SPSync.Core
                 using (Stream stream = new FileStream(localFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
                     stream.Seek(0, SeekOrigin.Begin);
-                    var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+                    var rootFolder = GetRootFolder(_configuration, context);
 
-                    var file = list.RootFolder.Files.Add(new FileCreationInformation()
+                    var file = rootFolder.Files.Add(new FileCreationInformation()
                     {
                         Url = destinationUrl,
                         ContentStream = stream,
@@ -712,12 +730,12 @@ namespace SPSync.Core
             Logger.LogDebug(Guid.Empty, Guid.Empty, "(CreateFoldersIfNotExists) relFolder={0}", relFolder);
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
-                context.Load(list.RootFolder.Folders);
+                var rootFolder = GetRootFolder(_configuration, context);
+                context.Load(rootFolder.Folders);
                 context.ExecuteQuery();
 
                 var folders = relFolder.Split('\\');
-                var searchFolderRoot = list.RootFolder.Folders;
+                var searchFolderRoot = rootFolder.Folders;
                 foreach (var folder in folders)
                 {
                     Folder folderExists = null;
