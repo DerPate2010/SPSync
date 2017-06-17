@@ -209,26 +209,8 @@
     <Compile Include="EditConfWindow.xaml.cs">
       <DependentUpon>EditConfWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Employee.cs">
-      <DependentUpon>Model2.tt</DependentUpon>
-    </Compile>
     <Compile Include="ErrorReport.xaml.cs">
       <DependentUpon>ErrorReport.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Model2.Context.cs">
-      <DependentUpon>Model2.Context.tt</DependentUpon>
-      <AutoGen>True</AutoGen>
-      <DesignTime>True</DesignTime>
-    </Compile>
-    <Compile Include="Model2.cs">
-      <DependentUpon>Model2.tt</DependentUpon>
-      <AutoGen>True</AutoGen>
-      <DesignTime>True</DesignTime>
-    </Compile>
-    <Compile Include="Model2.Designer.cs">
-      <DependentUpon>Model2.edmx</DependentUpon>
-      <AutoGen>True</AutoGen>
-      <DesignTime>True</DesignTime>
     </Compile>
     <Compile Include="SelectDocumentLibraryWindow.xaml.cs">
       <DependentUpon>SelectDocumentLibraryWindow.xaml</DependentUpon>
@@ -297,15 +279,8 @@
     <None Include="App.config">
       <SubType>Designer</SubType>
     </None>
-    <EntityDeploy Include="Model2.edmx">
-      <Generator>EntityModelCodeGenerator</Generator>
-      <LastGenOutput>Model2.Designer.cs</LastGenOutput>
-    </EntityDeploy>
     <None Include="MetadataStore.db">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="Model2.edmx.diagram">
-      <DependentUpon>Model2.edmx</DependentUpon>
     </None>
     <None Include="packages.config" />
     <AppDesigner Include="Properties\" />
@@ -352,18 +327,6 @@
       <ProductName>Windows Installer 4.5</ProductName>
       <Install>true</Install>
     </BootstrapperPackage>
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="Model2.Context.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <DependentUpon>Model2.edmx</DependentUpon>
-      <LastGenOutput>Model2.Context.cs</LastGenOutput>
-    </Content>
-    <Content Include="Model2.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <DependentUpon>Model2.edmx</DependentUpon>
-      <LastGenOutput>Model2.cs</LastGenOutput>
-    </Content>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Application_Files\DataBase\" />

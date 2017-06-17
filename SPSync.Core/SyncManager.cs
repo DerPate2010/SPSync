@@ -79,6 +79,18 @@ namespace SPSync.Core
             });
         }
 
+
+
+        public void SyncMetadatStoreIfNecessary()
+        {
+            
+        }
+
+        public void RunSynchronization()
+        {
+
+        }
+
         public int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
         {
             var countChanged = 1;
@@ -89,6 +101,8 @@ namespace SPSync.Core
 
                 try
                 {
+                    SyncMetadataStore(reviewOnly, _configuration.ConflictHandling, out moreChangesFound,
+                        rescanLocalFiles);
                     countChanged = _metadataStore.GetItemsToProcess();
 
                     if (reviewOnly || countChanged < 1)
@@ -259,7 +273,7 @@ namespace SPSync.Core
             }
         }
 
-        private int SyncMetadataStore(bool doNotSave, ConflictHandling conflictHandling, out bool moreChangesFound, bool rescanLocalFiles = true)
+        private void SyncMetadataStore(bool doNotSave, ConflictHandling conflictHandling, out bool moreChangesFound, bool rescanLocalFiles = true)
         {
             var sumWatch = Stopwatch.StartNew();
 
@@ -269,11 +283,6 @@ namespace SPSync.Core
             _metadataStore.ResetExceptErrors();
 
             var watch = Stopwatch.StartNew();
-
-            var remoteFileList = _sharePointManager.GetChangedFiles(_metadataStore, (percent, currentFile) =>
-             {
-                 OnSyncProgress(percent, ProgressStatus.Analyzing, $"Processing remote changes... '{currentFile}'");
-             });
 
             watch.Stop();
 
@@ -360,6 +369,11 @@ namespace SPSync.Core
 
             #region Iterate remote files/folders
 
+            var remoteFileList = _sharePointManager.GetChangedFiles(_metadataStore, (percent, currentFile) =>
+            {
+                OnSyncProgress(percent, ProgressStatus.Analyzing, $"Processing remote changes... '{currentFile}'");
+            });
+
             // update store for remote files/folders
             foreach (var remoteItem in remoteFileList)
             {
@@ -378,6 +392,10 @@ namespace SPSync.Core
                 var item = _metadataStore.GetByItemId(remoteItem.Id);
                 if (remoteItem.ChangeType == Microsoft.SharePoint.Client.ChangeType.Add)
                 {
+                    if (item == null)
+                    {
+                        item = _metadataStore.GetByFileName(localFile);
+                    }
                     // new
                     if (item == null)
                     {
@@ -502,8 +520,6 @@ namespace SPSync.Core
 
             itemsToDelete.ForEach(p => _metadataStore.Delete(p));
 
-            var countChanged = _metadataStore.ItemsChanged().Count();
-
             _metadataStore.ItemsChanged().ToList().ForEach(p =>
             {
                 Logger.LogDebug(correlationId, p.Id, "(Result) Item Name={0}, Status={1}, HasError={2}, LastError={3}", p.Name, p.Status, p.HasError, p.LastError);
@@ -519,7 +535,6 @@ namespace SPSync.Core
 
             moreChangesFound = remoteFileList.Count > 0;
 
-            return countChanged;
         }
 
         private void SyncChanges(int countChanged)

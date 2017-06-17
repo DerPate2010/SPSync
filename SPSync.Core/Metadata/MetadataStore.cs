@@ -68,7 +68,7 @@ namespace SPSync.Core.Metadata
             var storeFolder = Path.Combine(localFolder, STOREFOLDER);
             var hash = Convert.ToBase64String(System.Security.Cryptography.SHA1.Create()
                 .ComputeHash(Encoding.Default.GetBytes(localFolder))).Replace('/', '-').Replace('\\', '-');
-            var dbFile = Path.Combine(storeFolder, hash + ".db");
+            var dbFile = Path.Combine(storeFolder, "MetadataStore.db");
             return dbFile;
         }
 
@@ -256,11 +256,11 @@ namespace SPSync.Core.Metadata
         //    return BuildItemList(items);
         //}
 
-        //public IEnumerable<MetadataItem> ItemsWithError()
-        //{
-        //    var items = _db.MetadataStore.Where(p=> p.HasError == 1);
-        //    return BuildItemList(items);
-        //}
+        public IEnumerable<MetadataItem> ItemsWithError()
+        {
+            var items = _db.MetadataStore.Where(p => p.HasError == 1);
+            return BuildItemList(items);
+        }
 
         public bool GetNextItemToProcess(out MetadataItem item)
         {

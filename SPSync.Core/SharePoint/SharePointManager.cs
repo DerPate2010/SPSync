@@ -422,40 +422,38 @@ namespace SPSync.Core
             using (var context = GetClientContext())
             {
                 var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
-                context.Load(list, p => p.RootFolder.Files, p => p.RootFolder.Folders, p => p.RootFolder.Files.Include(f => f.ListItemAllFields.Id));
+                context.Load(list, l=>l.RootFolder.ServerRelativeUrl);
                 context.ExecuteQuery();
+                var trimLength = list.RootFolder.ServerRelativeUrl.Length;
 
-                var subFileList = DownloadFileNameListInternal(context, list.RootFolder, ".\\");
-                fileList.AddRange(subFileList);
+                ListItemCollectionPosition pos=null;
+                do
+                {
+                    var spItems = list.GetItems(CreateAllFilesQuery(pos));
+                    context.Load(spItems, icol => icol.Include(i => i.File),
+                        p => p.Include(f => f.File.ListItemAllFields.Id),icol=>icol.ListItemCollectionPosition);
+                    context.ExecuteQuery();
+                    pos = spItems.ListItemCollectionPosition;
+                    foreach (var itemI in spItems)
+                    {
+                        var item = itemI.File;
+                        var path = itemI.File.ServerRelativeUrl.Substring(trimLength);
+                        path = "." + path.Replace('/', '\\');
+                        fileList.Add(new SharePointItem(item.ListItemAllFields.Id, ItemType.File, ChangeType.Add,
+                            item.Name, item.ETag, item.TimeLastModified, path));
+                    }
+                } while (pos!=null);
             }
 
             return fileList;
         }
 
-        private List<SharePointItem> DownloadFileNameListInternal(ClientContext context, Folder folder, string folderFullPath)
+        public static CamlQuery CreateAllFilesQuery(ListItemCollectionPosition pos=null)
         {
-            var fileList = new List<SharePointItem>();
-
-            foreach (var item in folder.Files)
-            {
-                fileList.Add(new SharePointItem(item.ListItemAllFields.Id, ItemType.File, ChangeType.Add, item.Name, item.ETag, item.TimeLastModified, folderFullPath + item.Name));
-            }
-
-            //TODO: check if sub folder is in selected folders of config
-            foreach (var subFolder in folder.Folders)
-            {
-                if (subFolder.Name == "Forms")
-                    continue;
-
-                context.Load(subFolder, p => p.Files, p => p.Folders, p => p.Files.Include(f => f.ListItemAllFields.Id), p => p.Folders.Include(g => g.Files.Include(x => x.ListItemAllFields.Id)));
-                context.ExecuteQuery();
-                string newFullPath = folderFullPath + subFolder.Name + "\\";
-
-                var subFileList = DownloadFileNameListInternal(context, subFolder, newFullPath);
-                fileList.AddRange(subFileList);
-            }
-
-            return fileList;
+            var qry = new CamlQuery();
+            qry.ViewXml = "<View Scope=\"RecursiveAll\"><Query><Where><Eq><FieldRef Name=\"FSObjType\" /><Value Type=\"Integer\">0</Value></Eq></Where></Query><RowLimit>2000</RowLimit></View>";
+            qry.ListItemCollectionPosition = pos;
+            return qry;
         }
 
         internal DateTime GetFileTimestamp(string relativeFile, out int eTag)
