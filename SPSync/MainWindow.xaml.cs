@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Text;
 using System.Windows;
@@ -11,8 +12,10 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using ConsoleApp1;
 using Hardcodet.Wpf.TaskbarNotification;
 using SPSync.Core;
+using SPSync.Core.Metadata;
 
 namespace SPSync
 {
@@ -44,10 +47,12 @@ namespace SPSync
 
             HideWindow();
 
-            if (SquirrelSetup.IsFirstStart)
-            {
-                MessageBox.Show("SPSync was installed successfully. To add a new sync connection right-click on the SPSync icon in the task tray.", "SPSync", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
-            }
+            //if (SquirrelSetup.IsFirstStart)
+            //{
+            //    MessageBox.Show("SPSync was installed successfully. To add a new sync connection right-click on the SPSync icon in the task tray.", "SPSync", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            //}
+
+            
         }
 
         private void viewModel_NotifyInvalidCredentials(object sender, NotifyInvalidCredentialsEventArgs e)
@@ -168,7 +173,7 @@ namespace SPSync
                         break;
                     }
                 case "INFO":
-                    SquirrelSetup.TryUpdateAsync();
+                    //SquirrelSetup.TryUpdateAsync();
                     var version = System.Reflection.Assembly.GetEntryAssembly().GetName().Version.ToString(4);
                     MessageBox.Show(this, "SPSync - Version " + version + " BETA\n(C) 2016 Marco Wiedemeyer\nMore on http://spsync.net", "SPSync", MessageBoxButton.OK, MessageBoxImage.Information);
                     break;

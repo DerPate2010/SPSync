@@ -8,6 +8,7 @@ using SPSync.Core.Metadata;
 using SPSync.Core.Common;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.Net;
 
 namespace SPSync.Core
 {
@@ -80,7 +81,7 @@ namespace SPSync.Core
 
         public int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
         {
-            var countChanged = 0;
+            var countChanged = 1;
             bool moreChangesFound = false;
             lock (this)
             {
@@ -88,11 +89,7 @@ namespace SPSync.Core
 
                 try
                 {
-                    countChanged = SyncMetadataStore(reviewOnly, _configuration.ConflictHandling, out moreChangesFound, rescanLocalFiles);
-
-                    SyncResults = _metadataStore.GetResults();
-
-                    OnSyncProgress(10, ProgressStatus.Analyzed, string.Format("Found {0} modified items", countChanged));
+                    countChanged = _metadataStore.GetItemsToProcess();
 
                     if (reviewOnly || countChanged < 1)
                     {
@@ -100,7 +97,7 @@ namespace SPSync.Core
                         return countChanged;
                     }
 
-                    SyncChanges();
+                    SyncChanges(countChanged);
 
                     OnSyncProgress(100, ProgressStatus.Completed);
                 }
@@ -230,7 +227,7 @@ namespace SPSync.Core
 
                             if (isDirectory)
                             {
-                                foreach (var itemInFolder in _metadataStore.Items.Where(p => p.LocalFile.Contains(item.LocalFile)))
+                                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
                                 {
                                     if (itemInFolder.Id == item.Id)
                                         continue;
@@ -245,7 +242,7 @@ namespace SPSync.Core
 
                     _metadataStore.Save();
 
-                    SyncChanges();
+                    SyncChanges(1);
 
                     OnSyncProgress(100, ProgressStatus.Completed);
                 }
@@ -269,7 +266,7 @@ namespace SPSync.Core
             var correlationId = Guid.NewGuid();
 
             //reset item status for all items except the ones with errors
-            _metadataStore.Items.Where(p => p.Status != ItemStatus.Conflict).ToList().ForEach(p => { p.Status = ItemStatus.Unchanged; p.HasError = false; });
+            _metadataStore.ResetExceptErrors();
 
             var watch = Stopwatch.StartNew();
 
@@ -414,7 +411,7 @@ namespace SPSync.Core
 
                             if (item.Type == ItemType.Folder)
                             {
-                                foreach (var itemInFolder in _metadataStore.Items.Where(p => p.LocalFile.Contains(item.LocalFile)))
+                                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
                                 {
                                     if (itemInFolder.Id == item.Id)
                                         continue;
@@ -453,7 +450,7 @@ namespace SPSync.Core
             var itemsToDelete = new List<Guid>();
 
             // update store: files
-            foreach (var item in _metadataStore.Items.Where(p => p.Status == ItemStatus.Unchanged && p.Type == ItemType.File && !p.HasError))
+            foreach (var item in _metadataStore.ItemsUnchangedNoError(ItemType.File))
             {
                 var path = item.LocalFile;
 
@@ -475,7 +472,7 @@ namespace SPSync.Core
             }
 
             // update store: folders
-            foreach (var item in _metadataStore.Items.Where(p => p.Status == ItemStatus.Unchanged && p.Type == ItemType.Folder && !p.HasError))
+            foreach (var item in _metadataStore.ItemsUnchangedNoError(ItemType.Folder))
             {
                 var relFile = item.LocalFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
                 var path = item.LocalFile;
@@ -486,9 +483,9 @@ namespace SPSync.Core
                 if (!Directory.Exists(path))
                 {
                     item.Status = ItemStatus.DeletedLocal;
-
+                        
                     // delete all dependend items
-                    _metadataStore.Items.Where(p => p.LocalFolder == item.LocalFile).ToList().ForEach(p => { if (!itemsToDelete.Contains(p.Id)) itemsToDelete.Add(p.Id); });
+                    _metadataStore.ItemsInDir(item.LocalFile).ToList().ForEach(p => { if (!itemsToDelete.Contains(p.Id)) itemsToDelete.Add(p.Id); });
                 }
                 //if (remoteFileList.Count(p => p.FullFileName.Replace(_localFolder, string.Empty).TrimStart('.', '\\') + p.Name == relFile) < 1)
                 //{
@@ -505,9 +502,9 @@ namespace SPSync.Core
 
             itemsToDelete.ForEach(p => _metadataStore.Delete(p));
 
-            var countChanged = _metadataStore.Items.Count(p => p.Status != ItemStatus.Unchanged);
+            var countChanged = _metadataStore.ItemsChanged().Count();
 
-            _metadataStore.Items.Where(p => p.Status != ItemStatus.Unchanged).ToList().ForEach(p =>
+            _metadataStore.ItemsChanged().ToList().ForEach(p =>
             {
                 Logger.LogDebug(correlationId, p.Id, "(Result) Item Name={0}, Status={1}, HasError={2}, LastError={3}", p.Name, p.Status, p.HasError, p.LastError);
             });
@@ -525,92 +522,191 @@ namespace SPSync.Core
             return countChanged;
         }
 
-        private void SyncChanges()
+        private void SyncChanges(int countChanged)
         {
-            var allFolders = from p in _metadataStore.Items
-                             where p.Status != ItemStatus.Unchanged && p.Type == ItemType.Folder && !p.HasError
-                             select p;
-
-            var allFiles = from p in _metadataStore.Items
-                           where p.Status != ItemStatus.Unchanged && p.Type == ItemType.File && !p.HasError
-                           select p;
 
             List<Guid> itemsToDelete = new List<Guid>();
 
             var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
             var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
 
-            #region Sync Folder changes
-
-            int countFolders = 0;
-            int countAllFolders = allFolders.Count();
-
-            OnSyncProgress(20, ProgressStatus.Running, string.Format("Syncing {0} folders...", countAllFolders));
-
-            foreach (var item in allFolders)
+            int countProcessed=0;
+            
+            MetadataItem item;
+            while (_metadataStore.GetNextItemToProcess(out item))
             {
-                countFolders++;
+                countProcessed++;
+                OnItemProgress((int)(((double)countProcessed / (double)countChanged) * 100), item.Type,
+                    ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
 
+                bool itemToDelete =false;
+                if (item.Type == ItemType.Folder)
+                {
+                    ProcessFolder(item, syncToRemote, syncToLocal, out itemToDelete);
+                }
+                else if (item.Type == ItemType.File)
+                {
+                    ProcessFile(item, syncToRemote, syncToLocal, out itemToDelete);
+                }
+                if (itemToDelete)
+                {
+                    _metadataStore.Delete(item.Id);
+                }
+            }
+
+
+            OnSyncProgress(90, ProgressStatus.Running, "Finalizing...");
+
+            itemsToDelete.ForEach(p => _metadataStore.Delete(p));
+
+            _metadataStore.Save();
+        }
+
+        private string GetLogMessage(MetadataItem item)
+        {
+            switch (item.Status)
+            {
+                case ItemStatus.UpdatedLocal: return "Updating remote file";
+                case ItemStatus.UpdatedRemote: return "Updating local file";
+                case ItemStatus.DeletedLocal: return "Deleting remote file";
+                case ItemStatus.DeletedRemote: return "Deleting local file";
+                case ItemStatus.RenamedLocal: return "Renaming remote file";
+                case ItemStatus.RenamedRemote: return "Renaming local file";
+                default: return "Processing";
+            }
+        }
+
+        private bool ProcessFile(MetadataItem item, bool syncToRemote, bool syncToLocal, out bool itemToDelete)
+        {
+            itemToDelete = false;
+
+            try
+            {
                 var relFolder = item.LocalFolder.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                var relFile = item.LocalFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
                 if (item.Status == ItemStatus.UpdatedLocal && syncToRemote)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Updating remote folder {0}...", item.Name));
+                    // if not exists anymore (deleted between metadata and real sync)
+                    if (!File.Exists(item.LocalFile))
+                    {
+                        item.Status = ItemStatus.DeletedLocal;
+                        return true;
+                    }
 
                     try
                     {
-                        item.SharePointId = _sharePointManager.CreateFolder(relFolder, item.Name);
-                        item.LastModified = Directory.GetLastWriteTimeUtc(item.LocalFile);
+                        _sharePointManager.CreateFoldersIfNotExists(relFolder);
+                        int id = _sharePointManager.UploadFile(relFile, item.LocalFile);
+                        Logger.LogDebug("File uploaded with id: {0}", id);
+
+                        int etag;
+                        var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
+                        item.ETag = etag;
+                        Logger.LogDebug("Got ETag from remote file: {0}", etag);
+
+                        item.SharePointId = id;
+                        item.LastModified = File.GetLastWriteTimeUtc(item.LocalFile);
                         item.Status = ItemStatus.Unchanged;
                     }
-                    catch (Exception ex)
+                    catch (IOException ex)
                     {
-                        OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Warning, "Remote folder could not be created. Ignoring...", ex);
+                        OnLockedFile(item);
                     }
                 }
                 else if (item.Status == ItemStatus.UpdatedRemote && syncToLocal)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Updating local folder {0}...", item.Name));
+                    string fullNameNotSynchronized = item.LocalFile + ".spsync";
 
-                    if (!Directory.Exists(item.LocalFile))
-                        Directory.CreateDirectory(item.LocalFile);
-
-                    item.LastModified = Directory.GetLastWriteTimeUtc(item.LocalFile);
-                    item.Status = ItemStatus.Unchanged;
-                }
-                else if (item.Status == ItemStatus.DeletedLocal && syncToRemote)
-                {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Deleting remote folder {0}...", item.Name));
+                    int etag;
+                    var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
+                    item.ETag = etag;
+                    item.LastModified = remoteTimestamp;
 
                     try
                     {
-                        _sharePointManager.DeleteFolder(relFolder, item.Name);
+                        if (File.Exists(item.LocalFile))
+                        {
+                            _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile),
+                                Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
+                            item.Status = ItemStatus.Unchanged;
+                            return true;
+                        }
+
+                        if (File.Exists(fullNameNotSynchronized))
+                        {
+                            item.Status = ItemStatus.Unchanged;
+                            return true;
+                        }
+
+                        CreateFoldersIfNotExists(item.LocalFolder);
+
+                        if (_configuration.DownloadHeadersOnly)
+                        {
+                            File.Create(fullNameNotSynchronized).Close();
+                            File.SetLastWriteTimeUtc(fullNameNotSynchronized, remoteTimestamp);
+                        }
+                        else
+                        {
+                            _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile),
+                                Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
+                        }
+
+                        item.Status = ItemStatus.Unchanged;
+                    }
+                    catch (System.Net.WebException ex)
+                    {
+                        if (ex.InnerException != null && ex.InnerException is IOException)
+                        {
+                            OnLockedFile(item);
+                        }
+                        else
+                        {
+                            OnErrorProcessing(item, ex);
+                        }
+                    }
+                }
+                else if (item.Status == ItemStatus.DeletedLocal && syncToRemote)
+                {
+                    try
+                    {
+                        _sharePointManager.DeleteFile(item.SharePointId);
                     }
                     catch (Exception ex)
                     {
-                        OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Warning, "Remote folder could not be delete. Ignoring...", ex);
                     }
-                    itemsToDelete.Add(item.Id);
+                    itemToDelete = true;
                 }
                 else if (item.Status == ItemStatus.DeletedRemote && syncToLocal)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Deleting local folder {0}...", item.Name));
+                    try
+                    {
+                        if (File.Exists(item.LocalFile))
+                            FileHelper.RecycleFile(item.LocalFile);
+                        if (File.Exists(item.LocalFile + ".spsync"))
+                            FileHelper.RecycleFile(item.LocalFile + ".spsync");
 
-                    if (Directory.Exists(item.LocalFile))
-                        FileHelper.RecycleDirectory(item.LocalFile);
-
-                    itemsToDelete.Add(item.Id);
+                        itemToDelete = true;
+                    }
+                    catch (IOException ex)
+                    {
+                        OnLockedFile(item);
+                    }
                 }
                 else if (item.Status == ItemStatus.RenamedRemote)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Renaming local folder {0} to {1}...", item.Name, item.NewNameAfterRename));
 
                     try
                     {
                         var newFilePath = Path.Combine(item.LocalFolder, item.NewNameAfterRename);
-                        if (Directory.Exists(item.LocalFile))
+                        if (File.Exists(item.LocalFile))
                         {
-                            Directory.Move(item.LocalFile, newFilePath);
-                            item.LastModified = Directory.GetLastWriteTimeUtc(newFilePath);
+                            File.Move(item.LocalFile, newFilePath);
+                            item.LastModified = File.GetLastWriteTimeUtc(newFilePath);
+                        }
+                        if (File.Exists(item.LocalFile + ".spsync"))
+                        {
+                            File.Move(item.LocalFile + ".spsync", newFilePath + ".spsync");
+                            item.LastModified = File.GetLastWriteTimeUtc(newFilePath + ".spsync");
                         }
 
                         item.Name = item.NewNameAfterRename;
@@ -618,14 +714,11 @@ namespace SPSync.Core
                     }
                     catch (IOException ex)
                     {
-                        item.Status = ItemStatus.Unchanged;
-
-                        OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Warning, "Folder locked. Trying again later...", ex);
+                        OnLockedFile(item);
                     }
                 }
                 else if (item.Status == ItemStatus.RenamedLocal)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Running, string.Format("Renaming remote folder {0} to {1}...", item.Name, item.NewNameAfterRename));
 
                     try
                     {
@@ -636,250 +729,131 @@ namespace SPSync.Core
                     }
                     catch (IOException ex)
                     {
-                        item.Status = ItemStatus.Unchanged;
-
-                        OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Warning, "Folder locked. Trying again later...", ex);
+                        OnLockedFile(item);
                     }
                 }
                 else if (item.Status == ItemStatus.Conflict)
                 {
-                    OnItemProgress((int)(((double)countFolders / (double)countAllFolders) * 100), ItemType.Folder, ProgressStatus.Conflict, string.Format("Folder conflict: {0}. No changes have been made.", item.Name));
+                    // to keep both files, rename the local one
+                    var newFileCopy = Path.Combine(item.LocalFolder,
+                        Path.GetFileNameWithoutExtension(item.LocalFile) + "_" + Environment.MachineName + "_" +
+                        DateTime.Now.Ticks.ToString() + Path.GetExtension(item.LocalFile));
+                    File.Copy(item.LocalFile, newFileCopy);
+                    File.SetLastWriteTimeUtc(item.LocalFile, item.LastModified.AddHours(-1));
+                    item.Status = ItemStatus.Unchanged;
+                    item.ETag = 0;
                 }
             }
-
-            #endregion
-
-            #region Sync File changes
-
-            int countFiles = 0;
-            int countAllFiles = allFiles.Count();
-
-            OnSyncProgress(60, ProgressStatus.Running, string.Format("Syncing {0} files...", countAllFiles));
-
-            //Parallel.ForEach(allFiles, (item) =>
-            //{
-            foreach (var item in allFiles)
+            catch (Exception ex)
             {
-                countFiles++;
+                OnErrorProcessing(item, ex);
+            }
+            return false;
+        }
 
+        private static void OnErrorProcessing(MetadataItem item, Exception ex)
+        {
+            item.HasError = true;
+            item.LastError = ex.Message;
+            var soapEx = ex as System.Web.Services.Protocols.SoapException;
+            if (soapEx != null)
+            {
+                var detail = soapEx.Detail != null ? soapEx.Detail.OuterXml : "n/a";
+                item.LastError = item.LastError + detail;
+            }
+        }
+
+        private static void OnLockedFile(MetadataItem item)
+        {
+            //item.LastModified = item.LastModified - new TimeSpan(365, 0, 0, 0);
+            //item.Status = ItemStatus.Unchanged;
+        }
+
+        private void ProcessFolder(MetadataItem item, bool syncToRemote, bool syncToLocal, out bool itemToDelete)
+        {
+            itemToDelete = false;
+
+            var relFolder = item.LocalFolder.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+            if (item.Status == ItemStatus.UpdatedLocal && syncToRemote)
+            {
                 try
                 {
-                    var relFolder = item.LocalFolder.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
-                    var relFile = item.LocalFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
-                    if (item.Status == ItemStatus.UpdatedLocal && syncToRemote)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Updating remote file {0}...", item.Name));
-
-                        // if not exists anymore (deleted between metadata and real sync)
-                        if (!File.Exists(item.LocalFile))
-                        {
-                            item.Status = ItemStatus.DeletedLocal;
-                            return;
-                        }
-
-                        try
-                        {
-                            _sharePointManager.CreateFoldersIfNotExists(relFolder);
-                            int id = _sharePointManager.UploadFile(relFile, item.LocalFile);
-                            Logger.LogDebug("File uploaded with id: {0}", id);
-
-                            int etag;
-                            var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
-                            item.ETag = etag;
-                            Logger.LogDebug("Got ETag from remote file: {0}", etag);
-
-                            item.SharePointId = id;
-                            item.LastModified = File.GetLastWriteTimeUtc(item.LocalFile);
-                            item.Status = ItemStatus.Unchanged;
-                        }
-                        catch (IOException ex)
-                        {
-                            item.LastModified = item.LastModified - new TimeSpan(365, 0, 0, 0);
-                            item.Status = ItemStatus.Unchanged;
-
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
-                        }
-                    }
-                    else if (item.Status == ItemStatus.UpdatedRemote && syncToLocal)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Updating local file {0}...", item.Name));
-
-                        string fullNameNotSynchronized = item.LocalFile + ".spsync";
-
-                        int etag;
-                        var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
-                        item.ETag = etag;
-                        item.LastModified = remoteTimestamp;
-
-                        try
-                        {
-                            if (File.Exists(item.LocalFile))
-                            {
-                                _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile), Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
-                                item.Status = ItemStatus.Unchanged;
-                                return;
-                            }
-
-                            if (File.Exists(fullNameNotSynchronized))
-                            {
-                                item.Status = ItemStatus.Unchanged;
-                                return;
-                            }
-
-                            CreateFoldersIfNotExists(item.LocalFolder);
-
-                            if (_configuration.DownloadHeadersOnly)
-                            {
-                                File.Create(fullNameNotSynchronized).Close();
-                                File.SetLastWriteTimeUtc(fullNameNotSynchronized, remoteTimestamp);
-                            }
-                            else
-                            {
-                                _sharePointManager.DownloadFile(Path.GetFileName(item.LocalFile), Path.GetDirectoryName(item.LocalFile), remoteTimestamp);
-                            }
-
-                            item.Status = ItemStatus.Unchanged;
-                        }
-                        catch (System.Net.WebException ex)
-                        {
-                            if (ex.InnerException != null && ex.InnerException is IOException)
-                            {
-                                //item.Status = ItemStatus.Unchanged;
-
-                                OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
-                            }
-                            else
-                            {
-                                item.HasError = true;
-                                item.LastError = ex.Message;
-
-                                OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Error, "WebException", ex);
-                                throw;
-                            }
-                        }
-                    }
-                    else if (item.Status == ItemStatus.DeletedLocal && syncToRemote)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Deleting remote file {0}...", item.Name));
-
-                        try
-                        {
-                            _sharePointManager.DeleteFile(item.SharePointId);
-                        }
-                        catch (Exception ex)
-                        {
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Error, "Deleting from SharePoint failed. Ignoring...", ex);
-                        }
-                        itemsToDelete.Add(item.Id);
-                    }
-                    else if (item.Status == ItemStatus.DeletedRemote && syncToLocal)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Deleting local file {0}...", item.Name));
-
-                        try
-                        {
-                            if (File.Exists(item.LocalFile))
-                                FileHelper.RecycleFile(item.LocalFile);
-                            if (File.Exists(item.LocalFile + ".spsync"))
-                                FileHelper.RecycleFile(item.LocalFile + ".spsync");
-
-                            itemsToDelete.Add(item.Id);
-                        }
-                        catch (IOException ex)
-                        {
-                            item.Status = ItemStatus.Unchanged;
-
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
-                        }
-                    }
-                    else if (item.Status == ItemStatus.RenamedRemote)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Renaming local file {0} to {1}...", item.Name, item.NewNameAfterRename));
-
-                        try
-                        {
-                            var newFilePath = Path.Combine(item.LocalFolder, item.NewNameAfterRename);
-                            if (File.Exists(item.LocalFile))
-                            {
-                                File.Move(item.LocalFile, newFilePath);
-                                item.LastModified = File.GetLastWriteTimeUtc(newFilePath);
-                            }
-                            if (File.Exists(item.LocalFile + ".spsync"))
-                            {
-                                File.Move(item.LocalFile + ".spsync", newFilePath + ".spsync");
-                                item.LastModified = File.GetLastWriteTimeUtc(newFilePath + ".spsync");
-                            }
-
-                            item.Name = item.NewNameAfterRename;
-                            item.Status = ItemStatus.Unchanged;
-                        }
-                        catch (IOException ex)
-                        {
-                            item.Status = ItemStatus.Unchanged;
-
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
-                        }
-                    }
-                    else if (item.Status == ItemStatus.RenamedLocal)
-                    {
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Running, string.Format("Renaming remote file {0} to {1}...", item.Name, item.NewNameAfterRename));
-
-                        try
-                        {
-                            _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename);
-
-                            item.Name = item.NewNameAfterRename;
-                            item.Status = ItemStatus.Unchanged;
-                        }
-                        catch (IOException ex)
-                        {
-                            item.Status = ItemStatus.Unchanged;
-
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Warning, "File locked. Trying again later...", ex);
-                        }
-                    }
-                    else if (item.Status == ItemStatus.Conflict)
-                    {
-                        try
-                        {
-                            // to keep both files, rename the local one
-                            var newFileCopy = Path.Combine(item.LocalFolder, Path.GetFileNameWithoutExtension(item.LocalFile) + "_" + Environment.MachineName + "_" + DateTime.Now.Ticks.ToString() + Path.GetExtension(item.LocalFile));
-                            File.Copy(item.LocalFile, newFileCopy);
-                            File.SetLastWriteTimeUtc(item.LocalFile, item.LastModified.AddHours(-1));
-                            item.Status = ItemStatus.Unchanged;
-                            item.ETag = 0;
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Conflict, string.Format("File conflict: {0}. Renamed local file.", item.Name));
-                        }
-                        catch (Exception ex)
-                        {
-                            OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Conflict, string.Format("File conflict: {0}. No changes have been made.", item.Name), ex);
-                        }
-
-                    }
+                    item.SharePointId = _sharePointManager.CreateFolder(relFolder, item.Name);
+                    item.LastModified = Directory.GetLastWriteTimeUtc(item.LocalFile);
+                    item.Status = ItemStatus.Unchanged;
                 }
                 catch (Exception ex)
                 {
-                    item.HasError = true;
-                    item.LastError = ex.Message;
-                    //if (ex.GetType() == Type.GetType("Microsoft.SharePoint.SoapServer.SoapServerException"))
-                    var soapEx = ex as System.Web.Services.Protocols.SoapException;
-                    if (soapEx != null)
-                    {
-                        var detail = soapEx.Detail != null ? soapEx.Detail.OuterXml : "n/a";
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Error, string.Format("Error updating file {0}... - {1}\nDetails: {2}", item.Name, soapEx.Message, detail), soapEx);
-                    }
-                    else
-                        OnItemProgress((int)(((double)countFiles / (double)countAllFiles) * 100), ItemType.File, ProgressStatus.Error, string.Format("Error updating file {0}... - {1}", item.Name, ex.Message), ex);
                 }
             }
+            else if (item.Status == ItemStatus.UpdatedRemote && syncToLocal)
+            {
 
-            #endregion
+                if (!Directory.Exists(item.LocalFile))
+                    Directory.CreateDirectory(item.LocalFile);
 
-            OnSyncProgress(90, ProgressStatus.Running, "Finalizing...");
+                item.LastModified = Directory.GetLastWriteTimeUtc(item.LocalFile);
+                item.Status = ItemStatus.Unchanged;
+            }
+            else if (item.Status == ItemStatus.DeletedLocal && syncToRemote)
+            {
 
-            itemsToDelete.ForEach(p => _metadataStore.Delete(p));
+                try
+                {
+                    _sharePointManager.DeleteFolder(relFolder, item.Name);
+                }
+                catch (Exception ex)
+                {
+                }
+                itemToDelete = true;
+            }
+            else if (item.Status == ItemStatus.DeletedRemote && syncToLocal)
+            {
 
-            _metadataStore.Save();
+                if (Directory.Exists(item.LocalFile))
+                    FileHelper.RecycleDirectory(item.LocalFile);
+
+                itemToDelete = true;
+            }
+            else if (item.Status == ItemStatus.RenamedRemote)
+            {
+
+                try
+                {
+                    var newFilePath = Path.Combine(item.LocalFolder, item.NewNameAfterRename);
+                    if (Directory.Exists(item.LocalFile))
+                    {
+                        Directory.Move(item.LocalFile, newFilePath);
+                        item.LastModified = Directory.GetLastWriteTimeUtc(newFilePath);
+                    }
+
+                    item.Name = item.NewNameAfterRename;
+                    item.Status = ItemStatus.Unchanged;
+                }
+                catch (IOException ex)
+                {
+                    OnLockedFile(item);
+                }
+            }
+            else if (item.Status == ItemStatus.RenamedLocal)
+            {
+
+                try
+                {
+                    _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename);
+
+                    item.Name = item.NewNameAfterRename;
+                    item.Status = ItemStatus.Unchanged;
+                }
+                catch (IOException ex)
+                {
+                    OnLockedFile(item);
+                }
+            }
+            else if (item.Status == ItemStatus.Conflict)
+            {
+                
+            }
         }
 
         private void CreateFoldersIfNotExists(string path)

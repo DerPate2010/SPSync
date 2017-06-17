@@ -31,7 +31,7 @@ namespace SPSync
 
         public App()
         {
-            SquirrelSetup.HandleStartup();
+            //SquirrelSetup.HandleStartup();
 
             Logger.Log(string.Join("|", Environment.GetCommandLineArgs()));
         }

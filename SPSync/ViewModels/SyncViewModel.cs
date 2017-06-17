@@ -29,7 +29,7 @@ namespace SPSync
 
         #region Properties
 
-        public IEnumerable<MetadataItem> ItemsWithErrors => new MetadataStore(SyncConfiguration.LocalFolder).Items.Where(p => p.HasError);
+        public IEnumerable<MetadataItem> ItemsWithErrors => new MetadataStore(SyncConfiguration.LocalFolder).ItemsWithError();
 
         public int Percent
         {
@@ -293,7 +293,7 @@ namespace SPSync
 
             if (id == null)
             {
-                foreach (var item in store.Items.Where(p => p.HasError).Select(p => p.Id).ToArray())
+                foreach (var item in store.ItemsWithError().Select(p => p.Id).ToArray())
                 {
                     store.Delete(item);
                 }
