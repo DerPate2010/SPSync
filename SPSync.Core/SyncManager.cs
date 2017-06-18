@@ -37,7 +37,7 @@ namespace SPSync.Core
             ItemProgress?.Invoke(this, new ItemProgressEventArgs(_configuration, percent, type, status, message, innerException));
         }
 
-        protected void OnChangesProgress(int percent, ItemType type, ProgressStatus status, string message = "", Exception innerException = null)
+        protected void OnChangesProgress(int percent, ProgressStatus status, string message = "", Exception innerException = null)
         {
             ChangesProgress?.Invoke(this, new SyncProgressEventArgs(_configuration, percent, status, message, innerException));
         }
@@ -83,16 +83,43 @@ namespace SPSync.Core
             });
         }
 
-
+        public void WatchChanges()
+        {
+            //USN Journal
+            //Sharepoint changes
+        }
 
         public void SyncMetadatStoreIfNecessary()
         {
-            
+            SyncMetadataStore(false, _configuration.ConflictHandling, true);
         }
 
         public void RunSynchronization()
         {
+            var countChanged = 1;
 
+            lock (this)
+            {
+                OnSyncProgress(0, ProgressStatus.Analyzing);
+
+                try
+                {
+                    countChanged = _metadataStore.GetItemsToProcess();
+
+                    SyncChanges(countChanged);
+
+                    OnSyncProgress(100, ProgressStatus.Completed);
+                }
+                catch (Exception ex)
+                {
+                    //todo:
+                    if (_configuration.AuthenticationType == AuthenticationType.ADFS) //&& ex is webexception 403
+                    {
+                        Adfs.AdfsHelper.InValidateCookie();
+                    }
+                    OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
+                }
+            }
         }
 
         public int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
@@ -139,7 +166,7 @@ namespace SPSync.Core
             {
                 Logger.LogDebug("SynchronizeLocalFileChange Path={0} ChangeType={1} OldPath={2}", fullPath, changeType, oldFullPath);
 
-                OnSyncProgress(0, ProgressStatus.Analyzing);
+                OnChangesProgress(0, ProgressStatus.Analyzing);
 
                 try
                 {
@@ -148,20 +175,20 @@ namespace SPSync.Core
 
                     if (!syncToRemote)
                     {
-                        OnSyncProgress(100, ProgressStatus.Completed);
+                        OnChangesProgress(100, ProgressStatus.Completed);
                         return;
                     }
 
                     if (!_configuration.ShouldFileSync(fullPath))
                     {
-                        OnSyncProgress(100, ProgressStatus.Completed);
+                        OnChangesProgress(100, ProgressStatus.Completed);
                         return;
                     }
 
                     var localExtension = Path.GetExtension(fullPath);
                     if (localExtension == ".spsync")
                     {
-                        OnSyncProgress(100, ProgressStatus.Completed);
+                        OnChangesProgress(100, ProgressStatus.Completed);
                         return;
                     }
 
@@ -173,7 +200,7 @@ namespace SPSync.Core
                         {
                             if (File.GetAttributes(fullPath).HasFlag(FileAttributes.Hidden))
                             {
-                                OnSyncProgress(100, ProgressStatus.Completed);
+                                OnChangesProgress(100, ProgressStatus.Completed);
                                 return;
                             }
 
@@ -184,7 +211,7 @@ namespace SPSync.Core
                             {
                                 if (Path.GetDirectoryName(fullPath) == MetadataStore.STOREFOLDER)
                                 {
-                                    OnSyncProgress(100, ProgressStatus.Completed);
+                                    OnChangesProgress(100, ProgressStatus.Completed);
                                     return;
                                 }
                             }
@@ -192,14 +219,14 @@ namespace SPSync.Core
                             {
                                 if (Directory.GetParent(fullPath).Name == MetadataStore.STOREFOLDER)
                                 {
-                                    OnSyncProgress(100, ProgressStatus.Completed);
+                                    OnChangesProgress(100, ProgressStatus.Completed);
                                     return;
                                 }
                             }
                         }
                         catch
                         {
-                            OnSyncProgress(100, ProgressStatus.Completed);
+                            OnChangesProgress(100, ProgressStatus.Completed);
                             return;
                         }
                     }
@@ -258,7 +285,7 @@ namespace SPSync.Core
 
                     SyncChanges(1);
 
-                    OnSyncProgress(100, ProgressStatus.Completed);
+                    OnChangesProgress(100, ProgressStatus.Completed);
                 }
                 catch (Exception ex)
                 {
@@ -267,7 +294,7 @@ namespace SPSync.Core
                     {
                         Adfs.AdfsHelper.InValidateCookie();
                     }
-                    OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
+                    OnChangesProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
                     return;
                 }
             }
@@ -293,7 +320,7 @@ namespace SPSync.Core
 
             if (rescanLocalFiles)
             {
-                OnSyncProgress(0, ProgressStatus.Analyzing, "Processing local changes");
+                OnMetadataProgress(0,ItemType.Unknown, ProgressStatus.Analyzing, "Processing local changes");
 
                 #region Iterate local files/folders
 
@@ -371,7 +398,7 @@ namespace SPSync.Core
 
             var remoteFileList = _sharePointManager.GetChangedFiles(_metadataStore, (percent, currentFile) =>
             {
-                OnSyncProgress(percent, ProgressStatus.Analyzing, $"Processing remote changes... '{currentFile}'");
+                OnMetadataProgress(percent, ItemType.Unknown, ProgressStatus.Analyzing, $"Processing remote changes... '{currentFile}'");
             });
 
             // update store for remote files/folders
@@ -549,7 +576,7 @@ namespace SPSync.Core
             while (_metadataStore.GetNextItemToProcess(out item))
             {
                 countProcessed++;
-                OnMetadataProgress((int)(((double)countProcessed / (double)countChanged) * 100), item.Type,
+                OnSyncProgress((int)(((double)countProcessed / (double)countChanged) * 100),
                     ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
 
                 bool itemToDelete =false;
