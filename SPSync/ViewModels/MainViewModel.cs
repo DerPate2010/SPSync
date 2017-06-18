@@ -114,7 +114,9 @@ namespace SPSync
 
         void syncService_Progress(object sender, SyncServiceProgressEventArgs e)
         {
-            var sm = SyncModels.FirstOrDefault(p => p.LocalFolder == e.Configuration.LocalFolder);
+            var vm = SyncModels.FirstOrDefault(p => p.LocalFolder == e.Configuration.LocalFolder);
+            var sm = vm.SyncProcess;
+
             sm.Percent = e.Percent;
             sm.Status = e.Status;
             sm.Message = e.Message;
@@ -128,7 +130,7 @@ namespace SPSync
                     if (resp != null && resp.StatusCode == HttpStatusCode.Unauthorized)
                     {
                         MessageBox.Show("Your sync configuration has invalid credentials. Please update them and try again.", "SPSync", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        OnNotifyInvalidCredentials(sm);
+                        OnNotifyInvalidCredentials(vm);
                     }
                 }
 

@@ -16,6 +16,9 @@ namespace SPSync
         #region Events
 
         internal event EventHandler<SyncServiceProgressEventArgs> Progress;
+        internal event EventHandler<ItemProgressEventArgs> MetadataProgress;
+        internal event EventHandler<SyncProgressEventArgs> SyncProgress;
+        internal event EventHandler<SyncProgressEventArgs> ChangesProgress;
         internal event EventHandler<SyncServiceConflictEventArgs> Conflict;
 
         private void OnProgress(SyncConfiguration configuration, ItemType type, ProgressStatus status, int percent, string message, Exception innerException = null)
@@ -136,12 +139,31 @@ namespace SPSync
                         manager.SyncProgress += new EventHandler<SyncProgressEventArgs>(manager_SyncProgress);
                         manager.ItemProgress += new EventHandler<ItemProgressEventArgs>(manager_ItemProgress);
                         manager.ItemConflict += new EventHandler<ConflictEventArgs>(manager_ItemConflict);
+                        manager.ChangesProgress += new EventHandler<SyncProgressEventArgs>(manager_ChangesProgress);
                         _syncManagers.Add(conf.LocalFolder, manager);
                     }
                 }
             }
 
             return _syncManagers[conf.LocalFolder];
+        }
+
+        private void manager_ChangesProgress(object sender, SyncProgressEventArgs e)
+        {
+            ChangesProgress?.Invoke(sender, e);
+
+            OnProgress(e.Configuration, e.Status, e.Percent, e.Message, e.InnerException);
+
+            Logger.Log("[{3}] [{4}] {2} Sync: {1}% - {0}", e.Message, e.Percent, e.Status, DateTime.Now, e.Configuration.Name);
+            if (e.InnerException != null)
+            {
+                var ie = e.InnerException;
+                while (ie != null)
+                {
+                    Logger.Log("[{0}] [{1}] {2}{3}{4}", DateTime.Now, e.Configuration.Name, ie.Message, Environment.NewLine, ie.StackTrace);
+                    ie = ie.InnerException;
+                }
+            }
         }
 
         internal void SyncAll()
@@ -154,6 +176,7 @@ namespace SPSync
 
         private void manager_ItemProgress(object sender, ItemProgressEventArgs e)
         {
+            MetadataProgress?.Invoke(sender, e);
             OnProgress(e.Configuration, e.ItemType, e.Status, e.Percent, e.Message, e.InnerException);
 
             Logger.Log("[{4}] [{5}] {2} Item ({3}): {1}% - {0}", e.Message, e.Percent, e.Status, e.ItemType, DateTime.Now, e.Configuration.Name);
@@ -163,6 +186,7 @@ namespace SPSync
 
         private void manager_SyncProgress(object sender, SyncProgressEventArgs e)
         {
+            SyncProgress?.Invoke(sender, e);
             OnProgress(e.Configuration, e.Status, e.Percent, e.Message, e.InnerException);
 
             Logger.Log("[{3}] [{4}] {2} Sync: {1}% - {0}", e.Message, e.Percent, e.Status, DateTime.Now, e.Configuration.Name);

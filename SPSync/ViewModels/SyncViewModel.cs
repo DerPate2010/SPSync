@@ -9,27 +9,27 @@ using SPSync.Core.Metadata;
 
 namespace SPSync
 {
-    internal class SyncViewModel : INotifyPropertyChanged
+    class SyncProcessViewModel:INotifyPropertyChanged
     {
-        internal SyncConfiguration SyncConfiguration { get; set; }
         private int _percent;
         private ProgressStatus _status;
         private string _message;
+        private string _label;
 
-        public string[] ConflictModes => Enum.GetNames(typeof(ConflictHandling));
-
-        public string[] AuthenticationTypes => Enum.GetNames(typeof(AuthenticationType));
-
-        public string[] Directions => Enum.GetNames(typeof(SyncDirection));
-
-        internal SyncViewModel(SyncConfiguration configuration)
+        public SyncProcessViewModel(string label)
         {
-            SyncConfiguration = configuration;            
+            Label = label;
         }
 
-        #region Properties
-
-        public IEnumerable<MetadataItem> ItemsWithErrors => new MetadataStore(SyncConfiguration.LocalFolder).ItemsWithError();
+        public string Label
+        {
+            get { return _label; }
+            set
+            {
+                _label = value; 
+                OnPropertyChanged("Label");
+            }
+        }
 
         public int Percent
         {
@@ -85,6 +85,57 @@ namespace SPSync
                 }
             }
         }
+
+
+        private void OnPropertyChanged(string propertyName)
+        {
+            if (PropertyChanged != null)
+                PropertyChanged(this, new PropertyChangedEventArgs(propertyName));
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+    }
+
+    internal class SyncViewModel : INotifyPropertyChanged
+    {
+        private List<SyncProcessViewModel> _processes;
+        private SyncProcessViewModel _metadataProcess;
+        private SyncProcessViewModel _syncProcess;
+        private SyncProcessViewModel _changesProcess;
+        internal SyncConfiguration SyncConfiguration { get; set; }
+
+        public string[] ConflictModes => Enum.GetNames(typeof(ConflictHandling));
+
+        public string[] AuthenticationTypes => Enum.GetNames(typeof(AuthenticationType));
+
+        public string[] Directions => Enum.GetNames(typeof(SyncDirection));
+
+        internal SyncViewModel(SyncConfiguration configuration)
+        {
+            SyncConfiguration = configuration;
+            _metadataProcess = new SyncProcessViewModel("File database");
+            _syncProcess = new SyncProcessViewModel("Synchronisation");
+            _changesProcess = new SyncProcessViewModel("Changes");
+            Processes = new List<SyncProcessViewModel>()
+            {
+                MetadataProcess, SyncProcess, ChangesProcess
+            };
+        }
+
+        public List<SyncProcessViewModel> Processes
+        {
+            get { return _processes; }
+            set
+            {
+                _processes = value;
+                OnPropertyChanged("Processes");
+            }
+        }
+
+        #region Properties
+
+        public IEnumerable<MetadataItem> ItemsWithErrors => new MetadataStore(SyncConfiguration.LocalFolder).ItemsWithError();
+
 
         public string LocalFolder
         {
@@ -278,6 +329,21 @@ namespace SPSync
                     OnPropertyChanged("Domain");
                 }
             }
+        }
+
+        public SyncProcessViewModel MetadataProcess
+        {
+            get { return _metadataProcess; }
+        }
+
+        public SyncProcessViewModel SyncProcess
+        {
+            get { return _syncProcess; }
+        }
+
+        public SyncProcessViewModel ChangesProcess
+        {
+            get { return _changesProcess; }
         }
 
         #endregion

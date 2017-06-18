@@ -22,20 +22,24 @@ namespace SPSync.Core
 
         public event EventHandler<SyncProgressEventArgs> SyncProgress;
         public event EventHandler<ItemProgressEventArgs> ItemProgress;
+        public event EventHandler<SyncProgressEventArgs> ChangesProgress;
         public event EventHandler<ConflictEventArgs> ItemConflict;
 
         public string ConfigurationName => _configuration.Name;
 
         protected void OnSyncProgress(int percent, ProgressStatus status, string message = "", Exception innerException = null)
         {
-            if (SyncProgress != null)
-                SyncProgress(this, new SyncProgressEventArgs(_configuration, percent, status, message, innerException));
+            SyncProgress?.Invoke(this, new SyncProgressEventArgs(_configuration, percent, status, message, innerException));
         }
 
-        protected void OnItemProgress(int percent, ItemType type, ProgressStatus status, string message = "", Exception innerException = null)
+        protected void OnMetadataProgress(int percent, ItemType type, ProgressStatus status, string message = "", Exception innerException = null)
         {
-            if (ItemProgress != null)
-                ItemProgress(this, new ItemProgressEventArgs(_configuration, percent, type, status, message, innerException));
+            ItemProgress?.Invoke(this, new ItemProgressEventArgs(_configuration, percent, type, status, message, innerException));
+        }
+
+        protected void OnChangesProgress(int percent, ItemType type, ProgressStatus status, string message = "", Exception innerException = null)
+        {
+            ChangesProgress?.Invoke(this, new SyncProgressEventArgs(_configuration, percent, status, message, innerException));
         }
 
         protected ItemStatus OnItemConflict(MetadataItem item)
@@ -94,15 +98,14 @@ namespace SPSync.Core
         public int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
         {
             var countChanged = 1;
-            bool moreChangesFound = false;
+
             lock (this)
             {
                 OnSyncProgress(0, ProgressStatus.Analyzing);
 
                 try
                 {
-                    SyncMetadataStore(reviewOnly, _configuration.ConflictHandling, out moreChangesFound,
-                        rescanLocalFiles);
+                    SyncMetadataStore(reviewOnly, _configuration.ConflictHandling, rescanLocalFiles);
                     countChanged = _metadataStore.GetItemsToProcess();
 
                     if (reviewOnly || countChanged < 1)
@@ -126,9 +129,6 @@ namespace SPSync.Core
                     return -1;
                 }
             }
-
-            if (moreChangesFound)
-                countChanged += Synchronize(reviewOnly, rescanLocalFiles);
 
             return countChanged;
         }
@@ -273,7 +273,7 @@ namespace SPSync.Core
             }
         }
 
-        private void SyncMetadataStore(bool doNotSave, ConflictHandling conflictHandling, out bool moreChangesFound, bool rescanLocalFiles = true)
+        private void SyncMetadataStore(bool doNotSave, ConflictHandling conflictHandling, bool rescanLocalFiles = true)
         {
             var sumWatch = Stopwatch.StartNew();
 
@@ -533,8 +533,6 @@ namespace SPSync.Core
 
             sumWatch.Stop();
 
-            moreChangesFound = remoteFileList.Count > 0;
-
         }
 
         private void SyncChanges(int countChanged)
@@ -551,7 +549,7 @@ namespace SPSync.Core
             while (_metadataStore.GetNextItemToProcess(out item))
             {
                 countProcessed++;
-                OnItemProgress((int)(((double)countProcessed / (double)countChanged) * 100), item.Type,
+                OnMetadataProgress((int)(((double)countProcessed / (double)countChanged) * 100), item.Type,
                     ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
 
                 bool itemToDelete =false;
