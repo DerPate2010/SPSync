@@ -95,7 +95,6 @@ namespace SPSync
                 if (_fileChangeQueue.Count < 1)
                 {
                     _fileChangeDetectionTimer.Stop();
-                    _service.Sync(_config);
                     return;
                 }
 

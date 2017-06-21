@@ -91,6 +91,10 @@ namespace SPSync
             var sync = new MenuItem() { Header = "Sync all now", Tag = "SYNCALL" };
             sync.Click += new RoutedEventHandler(contextMenu_Click);
             contextMenu.Items.Add(sync);
+            // Sync all
+            var stop = new MenuItem() { Header = "Stop all now", Tag = "STOPALL" };
+            stop.Click += new RoutedEventHandler(contextMenu_Click);
+            contextMenu.Items.Add(stop);
 
             // Add new Sync Conf
             var newSync = new MenuItem() { Header = "New sync configuration...", Tag = "NEWSYNC" };
@@ -159,6 +163,9 @@ namespace SPSync
                 case "SYNCALL":
                     viewModel.SyncAll();
                     break;
+                case "STOPALL":
+                    viewModel.StopAll();
+                    break;
                 case "NEWSYNC":
                     {
                         NewConfig wind = new NewConfig();
@@ -186,7 +193,7 @@ namespace SPSync
                         var conf = viewModel.GetSyncConfiguration(localFolder);
                         if (tag.StartsWith("SYNC|"))
                         {
-                            var t = viewModel.SyncAsync(localFolder);
+                            viewModel.Sync(localFolder);
                         }
                         if (tag.StartsWith("EDIT|"))
                         {

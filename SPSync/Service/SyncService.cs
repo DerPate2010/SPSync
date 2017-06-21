@@ -92,19 +92,6 @@ namespace SPSync
             _syncManagers.Remove(conf.LocalFolder);
         }
 
-        internal async Task SyncAsync(SyncConfiguration conf)
-        {
-            var manager = GetSyncManager(conf);
-
-            var rescanLocalFiles = true;
-            if (_initialSyncCache.ContainsKey(conf.LocalFolder))
-                rescanLocalFiles = _initialSyncCache[conf.LocalFolder];
-
-            manager.Start();
-
-            _initialSyncCache[conf.LocalFolder] = false;
-        }
-
         internal void Sync(SyncConfiguration conf)
         {
             var manager = GetSyncManager(conf);
@@ -168,7 +155,14 @@ namespace SPSync
         {
             foreach (var confItem in SyncConfiguration.AllConfigurations)
             {
-                var t = SyncAsync(confItem.Value);
+                Sync(confItem.Value);
+            }
+        }
+        internal void StopAll()
+        {
+            foreach (var confItem in SyncConfiguration.AllConfigurations)
+            {
+                Sync(confItem.Value);
             }
         }
 

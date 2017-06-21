@@ -83,14 +83,18 @@ namespace SPSync
             NotifyPropertyChanged("SyncModels");
         }
 
-        internal async Task SyncAsync(string localFolder)
+        internal void Sync(string localFolder)
         {
-            await syncService.SyncAsync(SyncConfiguration.FindConfiguration(localFolder));
+            syncService.Sync(SyncConfiguration.FindConfiguration(localFolder));
         }
 
         internal void SyncAll()
         {
             syncService.SyncAll();
+        }
+        internal void StopAll()
+        {
+            syncService.StopAll();
         }
 
         public ObservableCollection<SyncViewModel> SyncModels => syncModels;

@@ -384,6 +384,10 @@ namespace SPSync.Core
                     
                     newChangeToken = changes.OrderBy(p => p.ChangeToken.StringValue).Last().ChangeToken.StringValue;
                 }
+                else
+                {
+                    newChangeToken = null;
+                }
 
                 foreach (var ti in tempFileList.GroupBy(p => p.Id))
                 {

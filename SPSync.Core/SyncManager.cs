@@ -30,6 +30,7 @@ namespace SPSync.Core
         private bool _metadataCompleted;
         private CancellationTokenSource _watchCancellation;
         private Task _watchTask;
+        private bool _running;
 
         public event EventHandler<SyncProgressEventArgs> SyncProgress;
         public event EventHandler<ItemProgressEventArgs> ItemProgress;
@@ -227,6 +228,8 @@ namespace SPSync.Core
 
         public void Start()
         {
+            if (_running) return;
+            _running = true;
             SyncMetadatStoreIfNecessary();
             WatchChanges();
             RunSynchronization();
@@ -234,10 +237,12 @@ namespace SPSync.Core
 
         public async Task Stop()
         {
+            if (!_running) return;
             _syncCancellation.Cancel();
             _metadataCancellation.Cancel();
             _watchCancellation.Cancel();
             await Task.WhenAll(_syncTask, _metadataTask, _watchTask);
+            _running = false;
         }
 
         public void RunSynchronization()
