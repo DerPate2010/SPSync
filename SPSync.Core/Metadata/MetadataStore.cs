@@ -15,8 +15,33 @@ namespace SPSync.Core.Metadata
     {
         public const string STOREFOLDER = ".spsync";
         private const string CHANGE_TOKEN_FILE = "ChangeToken.dat";
+        private const string USN_FILE = "UpdateSequenceNumber.dat";
 
-        public string ChangeToken { get; set; }
+        public string ChangeToken
+        {
+            get { return _changeToken; }
+            set
+            {
+                if (_changeToken != value)
+                {
+                    _changeToken = value;
+                    Save();
+                }
+            }
+        }
+
+        public long UpdateSequenceNumber
+        {
+            get { return _updateSequenceNumber; }
+            set
+            {
+                if (_updateSequenceNumber != value)
+                {
+                    _updateSequenceNumber = value;
+                    Save();
+                }
+            }
+        }
 
         public MetadataStoreEntities Db
         {
@@ -55,11 +80,20 @@ namespace SPSync.Core.Metadata
 
             try
             {
-                ChangeToken = File.ReadAllText(Path.Combine(storeFolder, CHANGE_TOKEN_FILE));
+                _changeToken = File.ReadAllText(Path.Combine(storeFolder, CHANGE_TOKEN_FILE));
             }
             catch (Exception ex)
             {
                 Logger.Log("Error loading ChangeToken for {0} {1}", localFolder, ex.Message);
+            }
+            try
+            {
+                var usnString = File.ReadAllText(Path.Combine(storeFolder, USN_FILE));
+                long.TryParse(usnString, out _updateSequenceNumber);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error loading UpdateSequenceNumber for {0} {1}", localFolder, ex.Message);
             }
         }
 
@@ -89,6 +123,11 @@ namespace SPSync.Core.Metadata
             try
             {
                 File.WriteAllText(Path.Combine(storeFolder, CHANGE_TOKEN_FILE), ChangeToken);
+            }
+            catch { }
+            try
+            {
+                File.WriteAllText(Path.Combine(storeFolder, USN_FILE), UpdateSequenceNumber.ToString());
             }
             catch { }
         }
@@ -126,6 +165,8 @@ namespace SPSync.Core.Metadata
         }
 
         private object _lock = new object();
+        private string _changeToken;
+        private long _updateSequenceNumber;
 
         public MetadataItem GetByFileName(string file)
         {

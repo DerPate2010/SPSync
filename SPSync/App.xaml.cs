@@ -41,7 +41,7 @@ namespace SPSync
             this.DispatcherUnhandledException += App_DispatcherUnhandledException;
 
             //HACK: disable SSL certificate check
-            ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
+            //ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
 
             string[] args = Environment.GetCommandLineArgs();
 

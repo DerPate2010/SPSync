@@ -230,14 +230,10 @@ namespace SPSync.Core
             }
         }
 
-        internal List<SharePointItem> GetChangedFiles(Metadata.MetadataStore metadataStore, Action<int, string> progressHandler)
+        internal void InitChangeTokenIfNecessary(Metadata.MetadataStore metadataStore)
         {
             if (string.IsNullOrEmpty(metadataStore.ChangeToken))
             {
-                Logger.LogDebug("No ChangeToken Found, downloading list of all files");
-                progressHandler(0, null);
-                var listOfAllFiles = DownloadFileList();
-
                 using (var context = GetClientContext())
                 {
                     var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
@@ -257,7 +253,8 @@ namespace SPSync.Core
 
                     if (changes.Count > 0)
                     {
-                        var newChangeToken = changes.OrderBy(p => p.ChangeToken.StringValue).Last().ChangeToken.StringValue;
+                        var newChangeToken = changes.OrderBy(p => p.ChangeToken.StringValue).Last().ChangeToken
+                            .StringValue;
                         Logger.LogDebug("Set ChangeToken from empty to new {0}", newChangeToken);
                         metadataStore.ChangeToken = newChangeToken;
                     }
@@ -266,10 +263,14 @@ namespace SPSync.Core
                         Logger.LogDebug("No initial changes found, so no ChangeToken set.");
                     }
                 }
+            }
+        }
 
-                progressHandler(100, null);
-
-                return listOfAllFiles;
+        internal List<SharePointItem> GetChangedFiles(Metadata.MetadataStore metadataStore, Action<int, string> progressHandler, out string newChangeToken)
+        {
+            if (string.IsNullOrEmpty(metadataStore.ChangeToken))
+            {
+                throw new ArgumentException("ChangeToken not initialized");
             }
 
             var fileList = new List<SharePointItem>();
@@ -380,17 +381,8 @@ namespace SPSync.Core
 
                 if (changes.Count > 0)
                 {
-                    var newChangeToken = changes.OrderBy(p => p.ChangeToken.StringValue).Last().ChangeToken.StringValue;
-                    if (string.IsNullOrEmpty(metadataStore.ChangeToken))
-                    {
-                        Logger.LogDebug("Set ChangeToken from empty to new {0}", newChangeToken);
-                        metadataStore.ChangeToken = newChangeToken;
-                    }
-                    else if (metadataStore.ChangeToken.CompareTo(newChangeToken) < 0)
-                    {
-                        Logger.LogDebug("Set ChangeToken from {0} to new {1}", metadataStore.ChangeToken, newChangeToken);
-                        metadataStore.ChangeToken = newChangeToken;
-                    }
+                    
+                    newChangeToken = changes.OrderBy(p => p.ChangeToken.StringValue).Last().ChangeToken.StringValue;
                 }
 
                 foreach (var ti in tempFileList.GroupBy(p => p.Id))
@@ -415,7 +407,7 @@ namespace SPSync.Core
             return fileList;
         }
 
-        private List<SharePointItem> DownloadFileList()
+        internal List<SharePointItem> DownloadFileList()
         {
             var fileList = new List<SharePointItem>();
 

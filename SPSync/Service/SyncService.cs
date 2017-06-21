@@ -100,12 +100,12 @@ namespace SPSync
             if (_initialSyncCache.ContainsKey(conf.LocalFolder))
                 rescanLocalFiles = _initialSyncCache[conf.LocalFolder];
 
-            await manager.SynchronizeAsync(rescanLocalFiles: rescanLocalFiles);
+            manager.Start();
 
             _initialSyncCache[conf.LocalFolder] = false;
         }
 
-        internal int Sync(SyncConfiguration conf)
+        internal void Sync(SyncConfiguration conf)
         {
             var manager = GetSyncManager(conf);
 
@@ -113,11 +113,9 @@ namespace SPSync
             if (_initialSyncCache.ContainsKey(conf.LocalFolder))
                 rescanLocalFiles = _initialSyncCache[conf.LocalFolder];
 
-            var changeCount = manager.Synchronize(rescanLocalFiles: rescanLocalFiles);
+            manager.Start();
 
             _initialSyncCache[conf.LocalFolder] = false;
-
-            return changeCount;
         }
 
         internal void SyncLocalFileChange(SyncConfiguration conf, string fullPath, FileChangeType changeType, string oldFullPath = null)
