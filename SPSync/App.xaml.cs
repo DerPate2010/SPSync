@@ -57,15 +57,15 @@ namespace SPSync
 
             base.OnStartup(e);
 
-            int intervalMinutes = 20;
-            if (!int.TryParse(ConfigurationManager.AppSettings["AutoSyncInterval"], out intervalMinutes))
-                intervalMinutes = 20;
+            //int intervalMinutes = 20;
+            //if (!int.TryParse(ConfigurationManager.AppSettings["AutoSyncInterval"], out intervalMinutes))
+            //    intervalMinutes = 20;
             
-            syncTimer = new Timer();
-            syncTimer.AutoReset = true;
-            syncTimer.Elapsed += new ElapsedEventHandler(syncTimer_Elapsed);
-            syncTimer.Interval = new TimeSpan(0, intervalMinutes, 0).TotalMilliseconds;
-            syncTimer.Start();
+            //syncTimer = new Timer();
+            //syncTimer.AutoReset = true;
+            //syncTimer.Elapsed += new ElapsedEventHandler(syncTimer_Elapsed);
+            //syncTimer.Interval = new TimeSpan(0, intervalMinutes, 0).TotalMilliseconds;
+            //syncTimer.Start();
         }
 
         void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

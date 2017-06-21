@@ -49,6 +49,8 @@ namespace SPSync
             UpdateSyncModels();
 
             IsInitialized = true;
+
+            SyncAll();
         }
 
         internal void AddOrUpdateConfiguration(SyncConfiguration configuration)
