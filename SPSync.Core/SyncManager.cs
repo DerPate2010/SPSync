@@ -265,8 +265,6 @@ namespace SPSync.Core
             {
             var countChanged = 1;
 
-            lock (this)
-            {
                 OnSyncProgress(0, ProgressStatus.Analyzing);
 
                 try
@@ -286,7 +284,7 @@ namespace SPSync.Core
                     }
                     OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
                 }
-            }
+            
         }
 
         private int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)

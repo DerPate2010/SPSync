@@ -43,11 +43,6 @@ namespace SPSync.Core.Metadata
             }
         }
 
-        public MetadataStoreEntities Db
-        {
-            get { return _db; }
-        }
-
         private string localFolder;
         private MetadataStoreEntities _db;
 
@@ -113,7 +108,10 @@ namespace SPSync.Core.Metadata
 
             try
             {
-                Db.SaveChanges();
+                lock (_lock)
+                {
+                    _db.SaveChanges();
+                }
             }
             catch (Exception ex)
             {
@@ -134,23 +132,33 @@ namespace SPSync.Core.Metadata
 
         public MetadataItem GetById(Guid id)
         {
-            var itemDb = Db.MetadataStore.Find(id.ToString());
+            MetadataItemDb itemDb;
+            lock (_lock)
+            {
+                itemDb = _db.MetadataStore.Find(id.ToString());
+            }
             var item = ToMetadataItem(itemDb);
             return item;
         }
 
         public void Delete(Guid id)
         {
-            var item = Db.MetadataStore.Find(id.ToString());
-            if (item != null) Db.MetadataStore.Remove(item);
-            _db.SaveChanges();
+            lock (_lock)
+            {
+                var item = _db.MetadataStore.Find(id.ToString());
+                if (item != null) _db.MetadataStore.Remove(item);
+                _db.SaveChanges();
+            }
         }
 
         public void Update(MetadataItem item)
         {
-            var itemDb = Db.MetadataStore.Find(item.Id.ToString());
-            item.ToDb(itemDb);
-            _db.SaveChanges();
+            lock (_lock)
+            {
+                var itemDb = _db.MetadataStore.Find(item.Id.ToString());
+                item.ToDb(itemDb);
+                _db.SaveChanges();
+            }
         }
 
         public void Add(MetadataItem item)
@@ -159,7 +167,7 @@ namespace SPSync.Core.Metadata
             {
                 var itemDb = new MetadataItemDb();
                 item.ToDb(itemDb);
-                Db.MetadataStore.Add(itemDb);
+                _db.MetadataStore.Add(itemDb);
                 _db.SaveChanges();
             }
         }
@@ -170,33 +178,29 @@ namespace SPSync.Core.Metadata
 
         public MetadataItem GetByFileName(string file)
         {
+            MetadataItemDb itemDb;
+
             lock (_lock)
             {
                 var fileInfo = new FileInfo(file);
 
-                var itemDb = Db.MetadataStore.FirstOrDefault(i => i.LocalFolder == fileInfo.DirectoryName && i.Name == fileInfo.Name);
-                if (itemDb == null) return null;
-                return ToMetadataItem(itemDb);
+                itemDb = _db.MetadataStore.FirstOrDefault(
+                    i => i.LocalFolder == fileInfo.DirectoryName && i.Name == fileInfo.Name);
             }
+            if (itemDb == null) return null;
+
+            return ToMetadataItem(itemDb);
         }
 
         public MetadataItem GetByItemId(int sharePointId)
         {
-            var itemDb = Db.MetadataStore.FirstOrDefault(i => i.SharePointId == sharePointId);
+            MetadataItemDb itemDb;
+            lock (_lock)
+            {
+                itemDb = _db.MetadataStore.FirstOrDefault(i => i.SharePointId == sharePointId);
+            }
             if (itemDb == null) return null;
             return ToMetadataItem(itemDb);
-        }
-
-        public MetadataItem[] GetResults()
-        {
-            List<MetadataItem> results = new List<MetadataItem>();
-
-            //foreach (var item in Items)
-            //{
-            //    results.Add(item.DeepClone());
-            //}
-
-            return results.ToArray();
         }
 
         public static void DeleteStoreForFolder(string localFolder)
@@ -250,7 +254,12 @@ namespace SPSync.Core.Metadata
 
         public IEnumerable<MetadataItem> ItemsInDirSub(string folder)
         {
-            var items = _db.MetadataStore.Where(p => p.LocalFolder.Contains(folder));
+            IQueryable<MetadataItemDb> items;
+
+            lock (_lock)
+            {
+                items = _db.MetadataStore.Where(p => p.LocalFolder.Contains(folder));
+            }
             return BuildItemList(items);
         }
 
@@ -267,27 +276,39 @@ namespace SPSync.Core.Metadata
 
         public void ResetExceptErrors()
         {
-            _db.MetadataStore.Where(p => p.Status != (long)ItemStatus.Conflict).ToList().ForEach(p => { p.Status = (long)ItemStatus.Unchanged; p.HasError = 0; });
-            _db.SaveChanges();
+            lock (_lock)
+            {
+                _db.MetadataStore.Where(p => p.Status != (long)ItemStatus.Conflict).ToList().ForEach(p => { p.Status = (long)ItemStatus.Unchanged; p.HasError = 0; });
+                _db.SaveChanges();
+            }
         }
 
         internal IEnumerable<MetadataItem> ItemsUnchangedNoError(ItemType file)
         {
-            var items = _db.MetadataStore.Where(p => p.Status == (long)ItemStatus.Unchanged && p.Type == (long)ItemType.File && p.HasError==0);
-            return BuildItemList(items);
+            lock (_lock)
+            {
+                var items = _db.MetadataStore.Where(p => p.Status == (long) ItemStatus.Unchanged &&
+                                                         p.Type == (long) ItemType.File && p.HasError == 0);
+                return BuildItemList(items);
+            }
         }
 
         public IEnumerable<MetadataItem> ItemsInDir(string folder)
         {
-            
-            var items = _db.MetadataStore.Where(p => p.LocalFolder == folder);
-            return BuildItemList(items);
-
+            lock (_lock)
+            {
+                var items = _db.MetadataStore.Where(p => p.LocalFolder == folder);
+                return BuildItemList(items);
+            }
         }
 
         public IEnumerable<MetadataItem> ItemsChanged()
         {
-            var items = _db.MetadataStore.Where(p => p.Status != (long)ItemStatus.Unchanged);
+            IQueryable<MetadataItemDb> items;
+            lock (_lock)
+            {
+                items = _db.MetadataStore.Where(p => p.Status != (long) ItemStatus.Unchanged);
+            }
             return BuildItemList(items);
         }
 
@@ -299,19 +320,41 @@ namespace SPSync.Core.Metadata
 
         public IEnumerable<MetadataItem> ItemsWithError()
         {
-            var items = _db.MetadataStore.Where(p => p.HasError == 1);
+            IQueryable<MetadataItemDb> items;
+            lock (_lock)
+            {
+                items = _db.MetadataStore.Where(p => p.HasError == 1);
+            }
             return BuildItemList(items);
         }
 
         public bool GetNextItemToProcess(out MetadataItem item)
         {
-            var itemDb = _db.MetadataStore.FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+            MetadataItemDb itemDb;
+            lock (_lock)
+            {
+              itemDb = _db.MetadataStore.FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+                
+            }
             item = ToMetadataItem(itemDb);
             return item != null;
         }
         public int GetItemsToProcess()
         {
-            return _db.MetadataStore.Count(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+            lock (_lock)
+            {
+
+
+                return _db.MetadataStore.Count(p => p.Status != (long) ItemStatus.Unchanged && p.HasError == 0);
+            }
+        }
+
+        public void SaveChanges()
+        {
+            lock (_lock)
+            {
+                _db.SaveChanges();
+            }
         }
     }
 }

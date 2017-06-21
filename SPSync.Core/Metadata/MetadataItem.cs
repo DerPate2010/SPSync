@@ -345,7 +345,7 @@ namespace SPSync.Core.Metadata
             if (_itemDb != null)
             {
                 ToDb(_itemDb);
-                _metadataStore.Db.SaveChanges();
+                _metadataStore.SaveChanges();
             }
             else
             {
