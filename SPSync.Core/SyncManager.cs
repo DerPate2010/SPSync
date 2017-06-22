@@ -111,7 +111,7 @@ namespace SPSync.Core
                 var remoteChanges = _sharePointManager.GetChangedFiles(_metadataStore, (i, s) => { }, out newChangeToken);
                 var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
                 ProcessRemoteChanges(_configuration.ConflictHandling,_watchCancellation.Token,remoteChanges, syncToLocal, Guid.NewGuid());
-                _metadataStore.ChangeToken = newChangeToken;
+                if (newChangeToken != null) _metadataStore.ChangeToken = newChangeToken;
                 if (remoteChanges.Any()) _syncEvent.Set();
 
 
