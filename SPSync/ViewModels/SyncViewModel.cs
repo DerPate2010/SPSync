@@ -122,6 +122,34 @@ namespace SPSync
             };
         }
 
+        public SyncViewModel(SyncConfiguration configuration, SyncManager syncManager) : this(configuration)
+        {
+            syncManager.SyncProgress += SyncManager_SyncProgress;
+            syncManager.ChangesProgress += SyncManager_ChangesProgress;
+            syncManager.ItemProgress += SyncManager_ItemProgress;
+        }
+
+        private void SyncManager_ItemProgress(object sender, ItemProgressEventArgs e)
+        {
+            _metadataProcess.Message = e.Message;
+            _metadataProcess.Percent = e.Percent;
+            _metadataProcess.Status = e.Status;
+        }
+
+        private void SyncManager_ChangesProgress(object sender, SyncProgressEventArgs e)
+        {
+            _changesProcess.Message = e.Message;
+            _changesProcess.Percent = e.Percent;
+            _changesProcess.Status = e.Status;
+        }
+
+        private void SyncManager_SyncProgress(object sender, SyncProgressEventArgs e)
+        {
+            _syncProcess.Message = e.Message;
+            _syncProcess.Percent = e.Percent;
+            _syncProcess.Status = e.Status;
+        }
+
         public List<SyncProcessViewModel> Processes
         {
             get { return _processes; }

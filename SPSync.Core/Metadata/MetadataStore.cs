@@ -333,7 +333,7 @@ namespace SPSync.Core.Metadata
             MetadataItemDb itemDb;
             lock (_lock)
             {
-              itemDb = _db.MetadataStore.FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
                 
             }
             item = ToMetadataItem(itemDb);

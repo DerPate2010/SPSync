@@ -270,7 +270,12 @@ namespace SPSync.Core
         {
             if (string.IsNullOrEmpty(metadataStore.ChangeToken))
             {
-                throw new ArgumentException("ChangeToken not initialized");
+                InitChangeTokenIfNecessary(metadataStore);
+                if (string.IsNullOrEmpty(metadataStore.ChangeToken))
+                {
+                    newChangeToken = null;
+                    return new List<SharePointItem>();
+                }
             }
 
             var fileList = new List<SharePointItem>();

@@ -112,7 +112,7 @@ namespace SPSync
             manager.SynchronizeLocalFileChange(fullPath, changeType, oldFullPath);
         }
 
-        private SyncManager GetSyncManager(SyncConfiguration conf)
+        internal SyncManager GetSyncManager(SyncConfiguration conf)
         {
             if (!_syncManagers.ContainsKey(conf.LocalFolder))
             {
@@ -121,10 +121,10 @@ namespace SPSync
                     if (!_syncManagers.ContainsKey(conf.LocalFolder))
                     {
                         SyncManager manager = new SyncManager(conf.LocalFolder);
-                        manager.SyncProgress += new EventHandler<SyncProgressEventArgs>(manager_SyncProgress);
-                        manager.ItemProgress += new EventHandler<ItemProgressEventArgs>(manager_ItemProgress);
+                        //manager.SyncProgress += new EventHandler<SyncProgressEventArgs>(manager_SyncProgress);
+                        //manager.ItemProgress += new EventHandler<ItemProgressEventArgs>(manager_ItemProgress);
                         manager.ItemConflict += new EventHandler<ConflictEventArgs>(manager_ItemConflict);
-                        manager.ChangesProgress += new EventHandler<SyncProgressEventArgs>(manager_ChangesProgress);
+                        //manager.ChangesProgress += new EventHandler<SyncProgressEventArgs>(manager_ChangesProgress);
                         _syncManagers.Add(conf.LocalFolder, manager);
                     }
                 }

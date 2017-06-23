@@ -105,18 +105,34 @@ namespace SPSync.Core
             
             while (!_watchCancellation.IsCancellationRequested)
             {
-                CheckUsnChanges(journalState, usnJournal);
+                OnChangesProgress(0, ProgressStatus.Running, "Check for changes");
 
-                string newChangeToken;
-                var remoteChanges = _sharePointManager.GetChangedFiles(_metadataStore, (i, s) => { }, out newChangeToken);
-                var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
-                ProcessRemoteChanges(_configuration.ConflictHandling,_watchCancellation.Token,remoteChanges, syncToLocal, Guid.NewGuid());
-                if (newChangeToken != null) _metadataStore.ChangeToken = newChangeToken;
-                if (remoteChanges.Any()) _syncEvent.Set();
+                try
+                {
+                    CheckUsnChanges(journalState, usnJournal);
+                }
+                catch (Exception e)
+                {
+                }
 
+                try
+                {
+                    string newChangeToken;
+                    var remoteChanges = _sharePointManager.GetChangedFiles(_metadataStore, (i, s) => { }, out newChangeToken);
+                    var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
+                    ProcessRemoteChanges(_configuration.ConflictHandling, _watchCancellation.Token, remoteChanges, syncToLocal, Guid.NewGuid());
+                    if (!string.IsNullOrEmpty(newChangeToken)) _metadataStore.ChangeToken = newChangeToken;
+                    if (remoteChanges.Any()) _syncEvent.Set();
+                }
+                catch (Exception e)
+                {
+                }
 
+                OnChangesProgress(0, ProgressStatus.Idle, "Wait for changes");
+                
                 _changeEvent.WaitOne(TimeSpan.FromSeconds(30));
             }
+            OnChangesProgress(0, ProgressStatus.Completed, "Stopped");
         }
 
         private void CheckUsnChanges(Win32Api.USN_JOURNAL_DATA journalState, NtfsUsnJournal usnJournal)
@@ -284,7 +300,6 @@ namespace SPSync.Core
                     }
                     OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
                 }
-            
         }
 
         private int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
@@ -471,21 +486,16 @@ namespace SPSync.Core
 
         private void SyncMetadataStore(ConflictHandling conflictHandling, CancellationToken cancellation, bool rescanLocalFiles = true)
         {
-            var sumWatch = Stopwatch.StartNew();
-
             var correlationId = Guid.NewGuid();
 
             //reset item status for all items except the ones with errors
             _metadataStore.ResetExceptErrors();
 
-            var watch = Stopwatch.StartNew();
-
-            watch.Stop();
-
             var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
             var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
 
             var searchOption = SearchOption.AllDirectories;
+            int counter = 0;
 
             if (rescanLocalFiles)
             {
@@ -493,11 +503,11 @@ namespace SPSync.Core
 
                 #region Iterate local files/folders
 
-                watch = Stopwatch.StartNew();
-
                 Parallel.ForEach(Directory.EnumerateDirectories(_localFolder, "*", searchOption), localFolder =>
                 {
                     cancellation.ThrowIfCancellationRequested();
+
+                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Process " + Path.GetFileName(localFolder) + " " + counter++);
 
                     if (!syncToRemote)
                         return;
@@ -522,15 +532,17 @@ namespace SPSync.Core
                         if (item.Status == ItemStatus.Conflict)
                             item.Status = OnItemConflict(item);
                     }
-                });
 
-                watch.Stop();
-                watch = Stopwatch.StartNew();
+                });
 
                 // update store for local files
                 Parallel.ForEach(Directory.EnumerateFiles(_localFolder, "*.*", searchOption), localFile =>
                 //foreach (var localFile in Directory.EnumerateFiles(_localFolder, "*.*", searchOption))
                 {
+                    cancellation.ThrowIfCancellationRequested();
+
+                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Process " + Path.GetFileName(localFile) + " " + counter++);
+
                     if (!syncToRemote)
                         return;
 
@@ -560,8 +572,6 @@ namespace SPSync.Core
                     }
                 });
 
-                watch.Stop();
-
                 #endregion
             }
 
@@ -582,6 +592,8 @@ namespace SPSync.Core
             foreach (var item in _metadataStore.ItemsUnchangedNoError(ItemType.File))
             {
                 if (cancellation.IsCancellationRequested) return;
+
+                OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Delete " + item.Name + " " + counter++);
 
 
                 var path = item.LocalFile;
@@ -608,6 +620,7 @@ namespace SPSync.Core
             {
                 if (cancellation.IsCancellationRequested) return;
 
+                OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Delete " + item.Name + " " + counter++);
 
                 var relFile = item.LocalFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
                 var path = item.LocalFile;
@@ -637,19 +650,14 @@ namespace SPSync.Core
 
             itemsToDelete.ForEach(p => _metadataStore.Delete(p));
 
-            _metadataStore.ItemsChanged().ToList().ForEach(p =>
-            {
-                Logger.LogDebug(correlationId, p.Id, "(Result) Item Name={0}, Status={1}, HasError={2}, LastError={3}", p.Name, p.Status, p.HasError, p.LastError);
-            });
-
             // reset error flag
             //_metadataStore.Items.Where(p => p.HasError && p.Status != ItemStatus.Unchanged).ToList().ForEach(p => p.HasError = false);
 
             _metadataStore.Save();
 
-            sumWatch.Stop();
-
             _metadataCompleted = true;
+
+            OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Completed);
         }
 
         private void ProcessRemoteChanges(ConflictHandling conflictHandling, CancellationToken cancellation,

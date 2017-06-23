@@ -41,7 +41,7 @@ namespace SPSync
             AllNextConflictsCache = new Dictionary<string, ItemStatus>();
 
             syncService = new SyncService();
-            syncService.Progress += new EventHandler<SyncServiceProgressEventArgs>(syncService_Progress);
+            //syncService.Progress += new EventHandler<SyncServiceProgressEventArgs>(syncService_Progress);
             syncService.Conflict += new EventHandler<SyncServiceConflictEventArgs>(syncService_Conflict);
             syncService.Init();
 
@@ -81,7 +81,11 @@ namespace SPSync
         private void UpdateSyncModels()
         {
             syncModels.Clear();
-            SyncConfiguration.AllConfigurations.ToList().ForEach(p => syncModels.Add(new SyncViewModel(p.Value)));
+            SyncConfiguration.AllConfigurations.ToList().ForEach(p =>
+            {
+                var syncManager = syncService.GetSyncManager(p.Value);
+                syncModels.Add(new SyncViewModel(p.Value,syncManager));
+            });
             NotifyPropertyChanged("SyncModels");
         }
 
