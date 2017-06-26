@@ -160,9 +160,9 @@ namespace SPSync
         }
         internal void StopAll()
         {
-            foreach (var confItem in SyncConfiguration.AllConfigurations)
+            foreach (var manager in _syncManagers)
             {
-                Sync(confItem.Value);
+                manager.Value.Stop();
             }
         }
 

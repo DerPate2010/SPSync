@@ -16,6 +16,7 @@ namespace SPSync.Core.Metadata
         public const string STOREFOLDER = ".spsync";
         private const string CHANGE_TOKEN_FILE = "ChangeToken.dat";
         private const string USN_FILE = "UpdateSequenceNumber.dat";
+        private const string INITIALSYNC_FILE = "InitialSync.dat";
 
         public string ChangeToken
         {
@@ -38,6 +39,19 @@ namespace SPSync.Core.Metadata
                 if (_updateSequenceNumber != value)
                 {
                     _updateSequenceNumber = value;
+                    Save();
+                }
+            }
+        }
+
+        public bool MetadataCompleted
+        {
+            get { return _metadataCompleted; }
+            set
+            {
+                if (_metadataCompleted != value)
+                {
+                    _metadataCompleted = value;
                     Save();
                 }
             }
@@ -90,6 +104,15 @@ namespace SPSync.Core.Metadata
             {
                 Logger.Log("Error loading UpdateSequenceNumber for {0} {1}", localFolder, ex.Message);
             }
+            try
+            {
+                var initString = File.ReadAllText(Path.Combine(storeFolder, INITIALSYNC_FILE));
+                bool.TryParse(initString, out _metadataCompleted);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error loading InitialSync for {0} {1}", localFolder, ex.Message);
+            }
         }
 
         private static string GetDbFilename(string localFolder)
@@ -126,6 +149,11 @@ namespace SPSync.Core.Metadata
             try
             {
                 File.WriteAllText(Path.Combine(storeFolder, USN_FILE), UpdateSequenceNumber.ToString());
+            }
+            catch { }
+            try
+            {
+                File.WriteAllText(Path.Combine(storeFolder, INITIALSYNC_FILE), MetadataCompleted.ToString());
             }
             catch { }
         }
@@ -175,6 +203,7 @@ namespace SPSync.Core.Metadata
         private object _lock = new object();
         private string _changeToken;
         private long _updateSequenceNumber;
+        private bool _metadataCompleted;
 
         public MetadataItem GetByFileName(string file)
         {
@@ -283,12 +312,12 @@ namespace SPSync.Core.Metadata
             }
         }
 
-        internal IEnumerable<MetadataItem> ItemsUnchangedNoError(ItemType file)
+        internal IEnumerable<MetadataItem> ItemsUnchangedNoError(ItemType type)
         {
             lock (_lock)
             {
                 var items = _db.MetadataStore.Where(p => p.Status == (long) ItemStatus.Unchanged &&
-                                                         p.Type == (long) ItemType.File && p.HasError == 0);
+                                                         p.Type == (long) type && p.HasError == 0);
                 return BuildItemList(items);
             }
         }
@@ -334,6 +363,10 @@ namespace SPSync.Core.Metadata
             lock (_lock)
             {
               itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+                if (itemDb != null && itemDb.Status.GetValueOrDefault() == (long) ItemStatus.Unchanged)
+                {
+                    Load();
+                }
                 
             }
             item = ToMetadataItem(itemDb);

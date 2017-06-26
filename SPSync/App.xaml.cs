@@ -38,6 +38,7 @@ namespace SPSync
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             this.DispatcherUnhandledException += App_DispatcherUnhandledException;
 
             //HACK: disable SSL certificate check
@@ -68,11 +69,22 @@ namespace SPSync
             //syncTimer.Start();
         }
 
+        private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            LogEx(e.ExceptionObject as Exception);
+        }
+
         void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
         {
-            Logger.Log("Unhandled Exception: {0}", e.Exception.Message);
 
-            var innerEx = e.Exception.InnerException;
+            LogEx(e.Exception);
+        }
+
+        private static void LogEx(Exception ex)
+        {
+            Logger.Log("Unhandled Exception: {0}", ex.ToString());
+
+            var innerEx = ex.InnerException;
             while (innerEx != null)
             {
                 Logger.Log("--->{0}", innerEx.Message);

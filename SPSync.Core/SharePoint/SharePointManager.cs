@@ -419,6 +419,7 @@ namespace SPSync.Core
         internal List<SharePointItem> DownloadFileList()
         {
             var fileList = new List<SharePointItem>();
+            var fileList2 =0;
 
             using (var context = GetClientContext())
             {
@@ -430,18 +431,28 @@ namespace SPSync.Core
                 ListItemCollectionPosition pos=null;
                 do
                 {
-                    var spItems = list.GetItems(CreateAllFilesQuery(pos));
+                    var c = CamlQuery.CreateAllItemsQuery(900, "Id", "ServerRelativeUrl", "Name");
+                    c.ListItemCollectionPosition = pos;
+                    //var c2 = CreateAllFilesQuery(pos);
+                    var spItems = list.GetItems(c);
                     context.Load(spItems, icol => icol.Include(i => i.File),
-                        p => p.Include(f => f.File.ListItemAllFields.Id),icol=>icol.ListItemCollectionPosition);
+                        p => p.Include(f => f.File.ListItemAllFields.Id, f=>f.FileSystemObjectType),icol=>icol.ListItemCollectionPosition, p=>p.Include(i=>i.ContentType.Name));
                     context.ExecuteQuery();
                     pos = spItems.ListItemCollectionPosition;
                     foreach (var itemI in spItems)
                     {
-                        var item = itemI.File;
-                        var path = itemI.File.ServerRelativeUrl.Substring(trimLength);
-                        path = "." + path.Replace('/', '\\');
-                        fileList.Add(new SharePointItem(item.ListItemAllFields.Id, ItemType.File, ChangeType.Add,
-                            item.Name, item.ETag, item.TimeLastModified, path));
+                        if (itemI.FileSystemObjectType==FileSystemObjectType.File)
+                        {
+                            var item = itemI.File;
+                            var path = itemI.File.ServerRelativeUrl.Substring(trimLength);
+                            path = "." + path.Replace('/', '\\');
+                            fileList.Add(new SharePointItem(item.ListItemAllFields.Id, ItemType.File, ChangeType.Add,
+                                item.Name, item.ETag, item.TimeLastModified, path));
+                        }
+                        else
+                        {
+                            fileList2++;
+                        }
                     }
                 } while (pos!=null);
             }
@@ -452,7 +463,7 @@ namespace SPSync.Core
         public static CamlQuery CreateAllFilesQuery(ListItemCollectionPosition pos=null)
         {
             var qry = new CamlQuery();
-            qry.ViewXml = "<View Scope=\"RecursiveAll\"><Query><Where><Eq><FieldRef Name=\"FSObjType\" /><Value Type=\"Integer\">0</Value></Eq></Where></Query><RowLimit>2000</RowLimit></View>";
+            qry.ViewXml = "<View Scope=\"RecursiveAll\"><Query><Where><Eq><FieldRef Name=\"FSObjType\" /><Value Type=\"Integer\">0</Value></Eq></Where></Query><RowLimit>10</RowLimit></View>";
             qry.ListItemCollectionPosition = pos;
             return qry;
         }
@@ -535,6 +546,8 @@ namespace SPSync.Core
 
         internal int CreateFolder(string relativePath, string folderName)
         {
+            CreateFoldersIfNotExists(relativePath);
+
             using (var context = GetClientContext())
             {
                 var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);

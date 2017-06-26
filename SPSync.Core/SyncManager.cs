@@ -14,6 +14,14 @@ using UsnJournal;
 
 namespace SPSync.Core
 {
+    public class UsnEntry
+    {
+        public ulong FileRefNumber { get; set; }
+        public string Path { get; set; }
+        public string NewPath { get; set; }
+        public uint ChangeType { get; set; }
+    }
+
     public class SyncManager
     {
         private string _localFolder;
@@ -27,7 +35,6 @@ namespace SPSync.Core
         private Task _syncTask;
         private CancellationTokenSource _metadataCancellation;
         private Task _metadataTask;
-        private bool _metadataCompleted;
         private CancellationTokenSource _watchCancellation;
         private Task _watchTask;
         private bool _running;
@@ -120,7 +127,10 @@ namespace SPSync.Core
                     string newChangeToken;
                     var remoteChanges = _sharePointManager.GetChangedFiles(_metadataStore, (i, s) => { }, out newChangeToken);
                     var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
-                    ProcessRemoteChanges(_configuration.ConflictHandling, _watchCancellation.Token, remoteChanges, syncToLocal, Guid.NewGuid());
+                    Action<string> progress = (name) =>
+                    {
+                    };
+                    ProcessRemoteChanges(_configuration.ConflictHandling, _watchCancellation.Token, remoteChanges, syncToLocal, Guid.NewGuid(), progress);
                     if (!string.IsNullOrEmpty(newChangeToken)) _metadataStore.ChangeToken = newChangeToken;
                     if (remoteChanges.Any()) _syncEvent.Set();
                 }
@@ -170,8 +180,8 @@ namespace SPSync.Core
 
             NtfsUsnJournal.UsnJournalReturnCode rtnCode =
                 usnJournal.GetUsnJournalEntries(usnCurrentJournalState, reasonMask, out usnEntries, out newUsnState);
-            var changes = new List<KeyValuePair<string,uint>>();
-            
+            var changes = new List<UsnEntry>();
+
             foreach (var usnEntry in usnEntries)
             {
                 string path;
@@ -186,7 +196,26 @@ namespace SPSync.Core
                         if (fullPath.ToLowerInvariant().StartsWith(_localFolder.ToLowerInvariant()) &&
                             !fullPath.Contains(".spsync"))
                         {
-                            changes.Add(new KeyValuePair<string, uint>(fullPath,usnEntry.Reason));
+                            if (usnEntry.Reason == Win32Api.USN_REASON_RENAME_NEW_NAME)
+                            {
+                                var rename =
+                                    changes.FirstOrDefault(
+                                        c => c.FileRefNumber == usnEntry.FileReferenceNumber &&
+                                             c.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME);
+                                if (rename != null)
+                                {
+                                    rename.NewPath = fullPath;
+                                }
+                            }
+                            else
+                            {
+                                changes.Add(new UsnEntry()
+                                {
+                                    Path = fullPath,
+                                    ChangeType = usnEntry.Reason,
+                                    FileRefNumber = usnEntry.FileReferenceNumber,
+                                });
+                            }
                         }
                     }
                 }
@@ -194,29 +223,49 @@ namespace SPSync.Core
 
             foreach (var change in changes)
             {
-                if ((change.Value & Win32Api.USN_REASON_CLOSE)>0)
+                if ((change.ChangeType & Win32Api.USN_REASON_CLOSE)>0)
                 {
                     continue;
                 }
 
-                var localFile = change.Key;
+                var localFile = change.Path;
                 var item = _metadataStore.GetByFileName(localFile);
+
                 if (item == null)
                 {
-                    if (change.Value == Win32Api.USN_REASON_FILE_DELETE || change.Value == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                    if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE)
                     {
                         
                     }
                     else
                     {
+                        if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                        {
+                            localFile = change.NewPath;
+                        }
                         _metadataStore.Add(new MetadataItem(localFile, ItemType.File));
                     }
                 }
                 else
                 {
-                    if (change.Value == Win32Api.USN_REASON_FILE_DELETE || change.Value == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                    if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE || change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
                     {
                         item.Status = ItemStatus.DeletedLocal;
+                    }
+                    else if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                    {
+                        item.NewNameAfterRename = Path.GetFileName(change.NewPath); //works for directories as well
+                        item.Status = ItemStatus.RenamedLocal;
+
+                        if (item.Type == ItemType.Folder)
+                        {
+                            foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                            {
+                                if (itemInFolder.Id == item.Id)
+                                    continue;
+                                itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, change.NewPath);
+                            }
+                        }
                     }
                     else
                     {
@@ -232,13 +281,38 @@ namespace SPSync.Core
             _metadataStore.UpdateSequenceNumber = newUsnState.NextUsn;
         }
 
-        public void SyncMetadatStoreIfNecessary()
+        public void BuildMetadatStoreIfNecessary()
         {
             _metadataCancellation = new CancellationTokenSource();
 
-            if (!_metadataCompleted)
+            if (!_metadataStore.MetadataCompleted)
             {
-                _metadataTask = Task.Run(()=> SyncMetadataStore(_configuration.ConflictHandling, _metadataCancellation.Token, true), _metadataCancellation.Token);
+                _metadataTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        BuildMetadataStore(_configuration.ConflictHandling, _metadataCancellation.Token, true);
+                    }
+                    catch (AggregateException ae)
+                    {
+                        if (ae.InnerExceptions.All(e => e is OperationCanceledException))
+                        {
+                            OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Warning, "Cancled");
+                        }
+                        else
+                        {
+                            OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Error, ae.InnerException.Message, ae);
+                        }
+                    }
+                    catch (OperationCanceledException e)
+                    {
+                        OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Warning, "Cancled");
+                    }
+                    catch (Exception e)
+                    {
+                        OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Error, e.Message, e);
+                    }
+                }, _metadataCancellation.Token);
             }
         }
 
@@ -246,7 +320,7 @@ namespace SPSync.Core
         {
             if (_running) return;
             _running = true;
-            SyncMetadatStoreIfNecessary();
+            BuildMetadatStoreIfNecessary();
             WatchChanges();
             RunSynchronization();
         }
@@ -254,10 +328,16 @@ namespace SPSync.Core
         public async Task Stop()
         {
             if (!_running) return;
-            _syncCancellation.Cancel();
-            _metadataCancellation.Cancel();
-            _watchCancellation.Cancel();
-            await Task.WhenAll(_syncTask, _metadataTask, _watchTask);
+            _syncCancellation?.Cancel();
+            _metadataCancellation?.Cancel();
+            _watchCancellation?.Cancel();
+            try
+            {
+                await Task.WhenAll(_syncTask, _metadataTask, _watchTask);
+            }
+            catch (Exception e)
+            {
+            }
             _running = false;
         }
 
@@ -278,28 +358,29 @@ namespace SPSync.Core
         }
 
         public void RunSynchronizationInternal(CancellationToken cancellation)
+        {
+            try
             {
-            var countChanged = 1;
-
                 OnSyncProgress(0, ProgressStatus.Analyzing);
 
-                try
-                {
-                    countChanged = _metadataStore.GetItemsToProcess();
+                var countChanged = _metadataStore.GetItemsToProcess();
+                SyncChanges(countChanged, cancellation);
 
-                    SyncChanges(countChanged, cancellation);
-
-                    OnSyncProgress(100, ProgressStatus.Completed);
-                }
-                catch (Exception ex)
+                OnSyncProgress(100, ProgressStatus.Completed);
+            }
+            catch (OperationCanceledException ex)
+            {
+                OnSyncProgress(100, ProgressStatus.Completed);
+            }
+            catch (Exception ex)
+            {
+                //todo:
+                if (_configuration.AuthenticationType == AuthenticationType.ADFS) //&& ex is webexception 403
                 {
-                    //todo:
-                    if (_configuration.AuthenticationType == AuthenticationType.ADFS) //&& ex is webexception 403
-                    {
-                        Adfs.AdfsHelper.InValidateCookie();
-                    }
-                    OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
+                    Adfs.AdfsHelper.InValidateCookie();
                 }
+                OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
+            }
         }
 
         private int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
@@ -312,7 +393,7 @@ namespace SPSync.Core
 
                 try
                 {
-                    SyncMetadataStore(_configuration.ConflictHandling, CancellationToken.None, rescanLocalFiles);
+                    BuildMetadataStore(_configuration.ConflictHandling, CancellationToken.None, rescanLocalFiles);
                     countChanged = _metadataStore.GetItemsToProcess();
 
                     if (reviewOnly || countChanged < 1)
@@ -484,12 +565,12 @@ namespace SPSync.Core
             }
         }
 
-        private void SyncMetadataStore(ConflictHandling conflictHandling, CancellationToken cancellation, bool rescanLocalFiles = true)
+        private void BuildMetadataStore(ConflictHandling conflictHandling, CancellationToken cancellation, bool rescanLocalFiles = true)
         {
             var correlationId = Guid.NewGuid();
 
             //reset item status for all items except the ones with errors
-            _metadataStore.ResetExceptErrors();
+            //_metadataStore.ResetExceptErrors();
 
             var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
             var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
@@ -503,11 +584,13 @@ namespace SPSync.Core
 
                 #region Iterate local files/folders
 
-                Parallel.ForEach(Directory.EnumerateDirectories(_localFolder, "*", searchOption), localFolder =>
+                Parallel.ForEach(Directory.EnumerateDirectories(_localFolder, "*", searchOption),
+                    new ParallelOptions() { MaxDegreeOfParallelism = 4 }
+                    , localFolder =>
                 {
                     cancellation.ThrowIfCancellationRequested();
 
-                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Process " + Path.GetFileName(localFolder) + " " + counter++);
+                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzing, "Process " + Path.GetFileName(localFolder) + " " + counter++);
 
                     if (!syncToRemote)
                         return;
@@ -528,20 +611,22 @@ namespace SPSync.Core
                     }
                     else
                     {
-                        item.UpdateWithLocalInfo(conflictHandling, correlationId);
-                        if (item.Status == ItemStatus.Conflict)
-                            item.Status = OnItemConflict(item);
+                        //item.UpdateWithLocalInfo(conflictHandling, correlationId);
+                        //if (item.Status == ItemStatus.Conflict)
+                        //    item.Status = OnItemConflict(item);
                     }
 
                 });
 
                 // update store for local files
-                Parallel.ForEach(Directory.EnumerateFiles(_localFolder, "*.*", searchOption), localFile =>
+                Parallel.ForEach(Directory.EnumerateFiles(_localFolder, "*.*", searchOption), 
+                    new ParallelOptions() {MaxDegreeOfParallelism = 4}, 
+                    localFile =>
                 //foreach (var localFile in Directory.EnumerateFiles(_localFolder, "*.*", searchOption))
                 {
                     cancellation.ThrowIfCancellationRequested();
 
-                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Process " + Path.GetFileName(localFile) + " " + counter++);
+                    OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzing, "Process " + Path.GetFileName(localFile) + " " + counter++);
 
                     if (!syncToRemote)
                         return;
@@ -566,9 +651,9 @@ namespace SPSync.Core
                     }
                     else
                     {
-                        item.UpdateWithLocalInfo(conflictHandling, correlationId);
-                        if (item.Status == ItemStatus.Conflict)
-                            item.Status = OnItemConflict(item);
+                        //item.UpdateWithLocalInfo(conflictHandling, correlationId);
+                        //if (item.Status == ItemStatus.Conflict)
+                        //    item.Status = OnItemConflict(item);
                     }
                 });
 
@@ -580,88 +665,26 @@ namespace SPSync.Core
             var remoteFileList = _sharePointManager.DownloadFileList();
 
             // update store for remote files/folders
-            ProcessRemoteChanges(conflictHandling, cancellation, remoteFileList, syncToLocal, correlationId);
+            Action<string> progress = (name) =>
+            {
+                OnMetadataProgress(0, ItemType.File, ProgressStatus.Analyzing, "Process remote" + Path.GetFileName(name) + " " + counter++);
+            };
+            ProcessRemoteChanges(conflictHandling, cancellation, remoteFileList, syncToLocal, correlationId, progress);
 
             #endregion
-
-            #region Check for deleted files/folders
-
-            var itemsToDelete = new List<Guid>();
-
-            // update store: files
-            foreach (var item in _metadataStore.ItemsUnchangedNoError(ItemType.File))
-            {
-                if (cancellation.IsCancellationRequested) return;
-
-                OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Delete " + item.Name + " " + counter++);
-
-
-                var path = item.LocalFile;
-
-                if (!_configuration.ShouldFileSync(path))
-                    continue;
-
-                if (!File.Exists(path) && !File.Exists(path + ".spsync"))
-                {
-                    item.Status = ItemStatus.DeletedLocal;
-                }
-                //if (remoteFileList.Count(p => p.Id == item.SharePointId) < 1)
-                //{
-                //    if (item.Status == ItemStatus.DeletedLocal)
-                //    {
-                //        itemsToDelete.Add(item.Id);
-                //    }
-                //    item.Status = ItemStatus.DeletedRemote;
-                //}
-            }
-
-            // update store: folders
-            foreach (var item in _metadataStore.ItemsUnchangedNoError(ItemType.Folder))
-            {
-                if (cancellation.IsCancellationRequested) return;
-
-                OnMetadataProgress(0, ItemType.Folder, ProgressStatus.Analyzed, "Delete " + item.Name + " " + counter++);
-
-                var relFile = item.LocalFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
-                var path = item.LocalFile;
-
-                if (!_configuration.ShouldFileSync(path))
-                    continue;
-
-                if (!Directory.Exists(path))
-                {
-                    item.Status = ItemStatus.DeletedLocal;
-                        
-                    // delete all dependend items
-                    _metadataStore.ItemsInDir(item.LocalFile).ToList().ForEach(p => { if (!itemsToDelete.Contains(p.Id)) itemsToDelete.Add(p.Id); });
-                }
-                //if (remoteFileList.Count(p => p.FullFileName.Replace(_localFolder, string.Empty).TrimStart('.', '\\') + p.Name == relFile) < 1)
-                //{
-                //    if (item.Status == ItemStatus.DeletedLocal)
-                //    {
-                //        if (!itemsToDelete.Contains(item.Id))
-                //            itemsToDelete.Add(item.Id);
-                //    }
-                //    item.Status = ItemStatus.DeletedRemote;
-                //}
-            }
-
-            #endregion
-
-            itemsToDelete.ForEach(p => _metadataStore.Delete(p));
 
             // reset error flag
             //_metadataStore.Items.Where(p => p.HasError && p.Status != ItemStatus.Unchanged).ToList().ForEach(p => p.HasError = false);
 
-            _metadataStore.Save();
+            _metadataStore.MetadataCompleted = true;
 
-            _metadataCompleted = true;
+            _metadataStore.Save();
 
             OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Completed);
         }
 
         private void ProcessRemoteChanges(ConflictHandling conflictHandling, CancellationToken cancellation,
-            List<SharePointItem> remoteFileList, bool syncToLocal, Guid correlationId)
+            List<SharePointItem> remoteFileList, bool syncToLocal, Guid correlationId, Action<string> progress)
         {
             foreach (var remoteItem in remoteFileList)
             {
@@ -671,6 +694,8 @@ namespace SPSync.Core
                     continue;
 
                 var localFile = new DirectoryInfo(Path.Combine(_localFolder, remoteItem.FullFileName)).FullName;
+
+                progress(localFile);
 
                 if (!_configuration.ShouldFileSync(localFile))
                     continue;
