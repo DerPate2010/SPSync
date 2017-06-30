@@ -311,6 +311,16 @@ namespace SPSync.Core.Metadata
                 _db.SaveChanges();
             }
         }
+        public void ResetPostponed()
+        {
+            lock (_lock)
+            {
+                _db.MetadataStore.Where(p => p.Status >= POSTPONE_OFFSET).ToList().ForEach(p => { p.Status = p.Status- POSTPONE_OFFSET; });
+                _db.SaveChanges();
+            }
+        }
+
+        public const int POSTPONE_OFFSET = 1000;
 
         internal IEnumerable<MetadataItem> ItemsUnchangedNoError(ItemType type)
         {
@@ -362,7 +372,7 @@ namespace SPSync.Core.Metadata
             MetadataItemDb itemDb;
             lock (_lock)
             {
-              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0);
+              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0 && p.Status<1000);
                 if (itemDb != null && itemDb.Status.GetValueOrDefault() == (long) ItemStatus.Unchanged)
                 {
                     Load();

@@ -785,19 +785,17 @@ namespace SPSync.Core
         private void SyncChanges(int countChanged, CancellationToken cancellation)
         {
 
-            List<Guid> itemsToDelete = new List<Guid>();
-
             var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
             var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
 
             int countProcessed=0;
-            
             MetadataItem item;
             while (!cancellation.IsCancellationRequested && _metadataStore.GetNextItemToProcess(out item))
             {
                 countProcessed++;
                 OnSyncProgress((int)(((double)countProcessed / (double)countChanged) * 100),
                     ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
+
 
                 bool itemToDelete =false;
                 if (item.Type == ItemType.Folder)
@@ -812,12 +810,18 @@ namespace SPSync.Core
                 {
                     _metadataStore.Delete(item.Id);
                 }
+                else
+                {
+                    if (item.Status != ItemStatus.Unchanged)
+                    {
+                        item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                    }
+                }
             }
-
-
+            
             OnSyncProgress(90, ProgressStatus.Running, "Finalizing...");
 
-            itemsToDelete.ForEach(p => _metadataStore.Delete(p));
+            _metadataStore.ResetPostponed();
 
             _metadataStore.Save();
         }
