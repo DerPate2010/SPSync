@@ -9,6 +9,7 @@ using SPSync.Core.Common;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Net;
+using System.Text.RegularExpressions;
 using PInvoke;
 using UsnJournal;
 
@@ -795,7 +796,11 @@ namespace SPSync.Core
                 countProcessed++;
                 OnSyncProgress((int)(((double)countProcessed / (double)countChanged) * 100),
                     ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
-
+                if (FitsOneOfMultipleMasks(item.Name, _metadataStore.IgnorePattern))
+                {
+                    item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                    continue;
+                }
 
                 bool itemToDelete =false;
                 if (item.Type == ItemType.Folder)
@@ -824,6 +829,25 @@ namespace SPSync.Core
             _metadataStore.ResetPostponed();
 
             _metadataStore.Save();
+        }
+
+        private bool FitsOneOfMultipleMasks(string fileName, string[] fileMasks)
+        {
+            return fileMasks.Any(fileMask => FitsMask(fileName, fileMask));
+        }
+
+        private bool FitsMask(string fileName, string fileMask)
+        {
+            string pattern =
+                '^' +
+                Regex.Escape(fileMask.Replace(".", "__DOT__")
+                        .Replace("*", "__STAR__")
+                        .Replace("?", "__QM__"))
+                    .Replace("__DOT__", "[.]")
+                    .Replace("__STAR__", ".*")
+                    .Replace("__QM__", ".")
+                + '$';
+            return new Regex(pattern, RegexOptions.IgnoreCase).IsMatch(fileName);
         }
 
         private string GetLogMessage(MetadataItem item)

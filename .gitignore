@@ -173,3 +173,4 @@ UpgradeLog*.htm
 # Microsoft Fakes
 FakesAssemblies/
 /SPDeployer.sln.ide
+/.vs/SPSync/v15/sqlite3/storage.ide

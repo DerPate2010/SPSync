@@ -17,6 +17,7 @@ namespace SPSync.Core.Metadata
         private const string CHANGE_TOKEN_FILE = "ChangeToken.dat";
         private const string USN_FILE = "UpdateSequenceNumber.dat";
         private const string INITIALSYNC_FILE = "InitialSync.dat";
+        private const string IGNORE_FILE = "Ignore.txt";
 
         public string ChangeToken
         {
@@ -113,7 +114,18 @@ namespace SPSync.Core.Metadata
             {
                 Logger.Log("Error loading InitialSync for {0} {1}", localFolder, ex.Message);
             }
+            try
+            {
+                IgnorePattern = new string[] {"*.bak"};
+                IgnorePattern = File.ReadAllLines(Path.Combine(storeFolder, IGNORE_FILE));
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error loading InitialSync for {0} {1}", localFolder, ex.Message);
+            }
         }
+
+        public string[] IgnorePattern { get; set; }
 
         private static string GetDbFilename(string localFolder)
         {
