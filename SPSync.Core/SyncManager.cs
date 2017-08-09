@@ -282,7 +282,7 @@ namespace SPSync.Core
             _metadataStore.UpdateSequenceNumber = newUsnState.NextUsn;
         }
 
-        public void BuildMetadatStoreIfNecessary()
+        public void BuildMetadataStoreIfNecessary()
         {
             _metadataCancellation = new CancellationTokenSource();
 
@@ -307,7 +307,7 @@ namespace SPSync.Core
                     }
                     catch (OperationCanceledException e)
                     {
-                        OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Warning, "Cancled");
+                        OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Warning, "Canceled");
                     }
                     catch (Exception e)
                     {
@@ -321,7 +321,7 @@ namespace SPSync.Core
         {
             if (_running) return;
             _running = true;
-            BuildMetadatStoreIfNecessary();
+            BuildMetadataStoreIfNecessary();
             WatchChanges();
             RunSynchronization();
         }
