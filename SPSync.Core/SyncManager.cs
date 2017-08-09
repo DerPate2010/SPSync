@@ -121,6 +121,7 @@ namespace SPSync.Core
                 }
                 catch (Exception e)
                 {
+                    Logger.Log("CheckUsnChanges failed: " + e.ToString());
                 }
 
                 try
@@ -137,6 +138,7 @@ namespace SPSync.Core
                 }
                 catch (Exception e)
                 {
+                    Logger.Log("GetChangedFiles failed: " + e.ToString());
                 }
 
                 OnChangesProgress(0, ProgressStatus.Idle, "Wait for changes");
@@ -185,96 +187,115 @@ namespace SPSync.Core
 
             foreach (var usnEntry in usnEntries)
             {
-                string path;
-                NtfsUsnJournal.UsnJournalReturnCode usnRtnCode =
-                    usnJournal.GetPathFromFileReference(usnEntry.ParentFileReferenceNumber, out path);
-                if (usnRtnCode == NtfsUsnJournal.UsnJournalReturnCode.USN_JOURNAL_SUCCESS &&
-                    0 != string.Compare(path, "Unavailable", true))
+                try
                 {
-                    if (usnEntry.IsFile)
+                    string path;
+                    NtfsUsnJournal.UsnJournalReturnCode usnRtnCode =
+                        usnJournal.GetPathFromFileReference(usnEntry.ParentFileReferenceNumber, out path);
+                    if (usnRtnCode == NtfsUsnJournal.UsnJournalReturnCode.USN_JOURNAL_SUCCESS &&
+                        0 != string.Compare(path, "Unavailable", true))
                     {
-                        string fullPath = driveLetter + Path.Combine(path, usnEntry.Name);
-                        if (fullPath.ToLowerInvariant().StartsWith(_localFolder.ToLowerInvariant()) &&
-                            !fullPath.Contains(".spsync"))
+                        if (usnEntry.IsFile && !string.IsNullOrEmpty(usnEntry.Name))
                         {
-                            if (usnEntry.Reason == Win32Api.USN_REASON_RENAME_NEW_NAME)
+                            string fullPath = driveLetter + Path.Combine(path, usnEntry.Name);
+                            if (fullPath.ToLowerInvariant().StartsWith(_localFolder.ToLowerInvariant()) &&
+                                !fullPath.Contains(".spsync"))
                             {
-                                var rename =
-                                    changes.FirstOrDefault(
-                                        c => c.FileRefNumber == usnEntry.FileReferenceNumber &&
-                                             c.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME);
-                                if (rename != null)
+                                if (usnEntry.Reason == Win32Api.USN_REASON_RENAME_NEW_NAME)
                                 {
-                                    rename.NewPath = fullPath;
+                                    var rename =
+                                        changes.FirstOrDefault(
+                                            c => c.FileRefNumber == usnEntry.FileReferenceNumber &&
+                                                 c.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME);
+                                    if (rename != null)
+                                    {
+                                        rename.NewPath = fullPath;
+                                    }
                                 }
-                            }
-                            else
-                            {
-                                changes.Add(new UsnEntry()
+                                else
                                 {
-                                    Path = fullPath,
-                                    ChangeType = usnEntry.Reason,
-                                    FileRefNumber = usnEntry.FileReferenceNumber,
-                                });
+                                    changes.Add(new UsnEntry()
+                                    {
+                                        Path = fullPath,
+                                        ChangeType = usnEntry.Reason,
+                                        FileRefNumber = usnEntry.FileReferenceNumber,
+                                    });
+                                }
                             }
                         }
                     }
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Process usn entry failed for " + usnEntry.Name + " " + usnEntry.Reason +
+                               ": " + e.ToString());
                 }
             }
 
             foreach (var change in changes)
             {
-                if ((change.ChangeType & Win32Api.USN_REASON_CLOSE)>0)
+                try
                 {
-                    continue;
-                }
 
-                var localFile = change.Path;
-                var item = _metadataStore.GetByFileName(localFile);
 
-                if (item == null)
-                {
-                    if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE)
+                    if ((change.ChangeType & Win32Api.USN_REASON_CLOSE) > 0)
                     {
-                        
+                        continue;
+                    }
+
+                    var localFile = change.Path;
+                    var item = _metadataStore.GetByFileName(localFile);
+
+                    if (item == null)
+                    {
+                        if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE)
+                        {
+
+                        }
+                        else
+                        {
+                            if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                            {
+                                localFile = change.NewPath;
+                            }
+                            _metadataStore.Add(new MetadataItem(localFile, ItemType.File));
+                        }
                     }
                     else
                     {
-                        if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                        if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE ||
+                            change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
                         {
-                            localFile = change.NewPath;
+                            item.Status = ItemStatus.DeletedLocal;
                         }
-                        _metadataStore.Add(new MetadataItem(localFile, ItemType.File));
-                    }
-                }
-                else
-                {
-                    if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE || change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
-                    {
-                        item.Status = ItemStatus.DeletedLocal;
-                    }
-                    else if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
-                    {
-                        item.NewNameAfterRename = Path.GetFileName(change.NewPath); //works for directories as well
-                        item.Status = ItemStatus.RenamedLocal;
-
-                        if (item.Type == ItemType.Folder)
+                        else if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
                         {
-                            foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                            item.NewNameAfterRename = Path.GetFileName(change.NewPath); //works for directories as well
+                            item.Status = ItemStatus.RenamedLocal;
+
+                            if (item.Type == ItemType.Folder)
                             {
-                                if (itemInFolder.Id == item.Id)
-                                    continue;
-                                itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, change.NewPath);
+                                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                                {
+                                    if (itemInFolder.Id == item.Id)
+                                        continue;
+                                    itemInFolder.LocalFolder =
+                                        itemInFolder.LocalFolder.Replace(item.LocalFile, change.NewPath);
+                                }
                             }
                         }
-                    }
-                    else
-                    {
-                        item.UpdateWithLocalInfo(_configuration.ConflictHandling, correlationId);
-                    }
+                        else
+                        {
+                            item.UpdateWithLocalInfo(_configuration.ConflictHandling, correlationId);
+                        }
 
-                    if (item.Status == ItemStatus.Conflict)
-                        item.Status = OnItemConflict(item);
+                        if (item.Status == ItemStatus.Conflict)
+                            item.Status = OnItemConflict(item);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Process grouped usn changes failed for " + change.Path + " " + change.ChangeType + ": " + e.ToString());
                 }
             }
             if (changes.Any()) _syncEvent.Set();
@@ -425,145 +446,6 @@ namespace SPSync.Core
         public void SynchronizeLocalFileChange(string fullPath, FileChangeType changeType, string oldFullPath)
         {
             _changeEvent.Set();
-        }
-        private void SynchronizeLocalFileChange2(string fullPath, FileChangeType changeType, string oldFullPath)
-        {
-            lock (this)
-            {
-                Logger.LogDebug("SynchronizeLocalFileChange Path={0} ChangeType={1} OldPath={2}", fullPath, changeType, oldFullPath);
-
-                OnChangesProgress(0, ProgressStatus.Analyzing);
-
-                try
-                {
-                    var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
-                    var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
-
-                    if (!syncToRemote)
-                    {
-                        OnChangesProgress(100, ProgressStatus.Completed);
-                        return;
-                    }
-
-                    if (!_configuration.ShouldFileSync(fullPath))
-                    {
-                        OnChangesProgress(100, ProgressStatus.Completed);
-                        return;
-                    }
-
-                    var localExtension = Path.GetExtension(fullPath);
-                    if (localExtension == ".spsync")
-                    {
-                        OnChangesProgress(100, ProgressStatus.Completed);
-                        return;
-                    }
-
-                    var isDirectory = false;
-
-                    if (changeType != FileChangeType.Deleted)
-                    {
-                        try
-                        {
-                            if (File.GetAttributes(fullPath).HasFlag(FileAttributes.Hidden))
-                            {
-                                OnChangesProgress(100, ProgressStatus.Completed);
-                                return;
-                            }
-
-                            if (File.GetAttributes(fullPath).HasFlag(FileAttributes.Directory))
-                                isDirectory = true;
-
-                            if (isDirectory)
-                            {
-                                if (Path.GetDirectoryName(fullPath) == MetadataStore.STOREFOLDER)
-                                {
-                                    OnChangesProgress(100, ProgressStatus.Completed);
-                                    return;
-                                }
-                            }
-                            else
-                            {
-                                if (Directory.GetParent(fullPath).Name == MetadataStore.STOREFOLDER)
-                                {
-                                    OnChangesProgress(100, ProgressStatus.Completed);
-                                    return;
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            OnChangesProgress(100, ProgressStatus.Completed);
-                            return;
-                        }
-                    }
-
-                    MetadataItem item = null;
-
-                    if (string.IsNullOrEmpty(oldFullPath))
-                    {
-                        item = _metadataStore.GetByFileName(fullPath);
-                    }
-                    else
-                    {
-                        item = _metadataStore.GetByFileName(oldFullPath);
-                        if (item == null)
-                        {
-                            changeType = FileChangeType.Changed;
-                            item = _metadataStore.GetByFileName(fullPath);
-                        }
-                    }
-
-                    if (item == null)
-                    {
-                        if (changeType != FileChangeType.Deleted)
-                        {
-                            if (_metadataStore.GetByFileName(fullPath) == null)
-                                _metadataStore.Add(new MetadataItem(fullPath, isDirectory ? ItemType.Folder : ItemType.File));
-                        }
-                    }
-                    else
-                    {
-                        item.UpdateWithLocalInfo(_configuration.ConflictHandling, Guid.NewGuid());
-                        if (item.Status == ItemStatus.Conflict)
-                            item.Status = OnItemConflict(item);
-
-                        if (changeType == FileChangeType.Renamed)
-                        {
-                            item.NewNameAfterRename = Path.GetFileName(fullPath); //works for directories as well
-                            item.Status = ItemStatus.RenamedLocal;
-
-                            if (isDirectory)
-                            {
-                                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
-                                {
-                                    if (itemInFolder.Id == item.Id)
-                                        continue;
-                                    itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, fullPath);
-                                }
-                            }
-                        }
-                    }
-
-                    if (changeType == FileChangeType.Deleted && item != null)
-                        item.Status = ItemStatus.DeletedLocal;
-
-                    _metadataStore.Save();
-
-                    SyncChanges(1, CancellationToken.None);
-
-                    OnChangesProgress(100, ProgressStatus.Completed);
-                }
-                catch (Exception ex)
-                {
-                    //todo:
-                    if (_configuration.AuthenticationType == AuthenticationType.ADFS) //&& ex is webexception 403
-                    {
-                        Adfs.AdfsHelper.InValidateCookie();
-                    }
-                    OnChangesProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
-                    return;
-                }
-            }
         }
 
         private void BuildMetadataStore(ConflictHandling conflictHandling, CancellationToken cancellation, bool rescanLocalFiles = true)
