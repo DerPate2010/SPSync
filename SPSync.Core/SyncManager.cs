@@ -401,6 +401,7 @@ namespace SPSync.Core
                 {
                     Adfs.AdfsHelper.InValidateCookie();
                 }
+                Logger.Log("An error has occured: " + ex.ToString());
                 OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
             }
         }
@@ -678,31 +679,56 @@ namespace SPSync.Core
                 countProcessed++;
                 OnSyncProgress((int)(((double)countProcessed / (double)countChanged) * 100),
                     ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
-                if (FitsOneOfMultipleMasks(item.Name, _metadataStore.IgnorePattern))
+                Logger.LogDebug("Sync item: " + GetLogMessage(item));
+                try
                 {
-                    item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
-                    continue;
-                }
 
-                bool itemToDelete =false;
-                if (item.Type == ItemType.Folder)
-                {
-                    ProcessFolder(item, syncToRemote, syncToLocal, out itemToDelete);
-                }
-                else if (item.Type == ItemType.File)
-                {
-                    ProcessFile(item, syncToRemote, syncToLocal, out itemToDelete);
-                }
-                if (itemToDelete)
-                {
-                    _metadataStore.Delete(item.Id);
-                }
-                else
-                {
-                    if (item.Status != ItemStatus.Unchanged)
+                    if (FitsOneOfMultipleMasks(item.Name, _metadataStore.IgnorePattern))
                     {
                         item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                        continue;
                     }
+
+                    bool itemToDelete = false;
+                    if (item.Type == ItemType.Folder)
+                    {
+                        ProcessFolder(item, syncToRemote, syncToLocal, out itemToDelete);
+                    }
+                    else if (item.Type == ItemType.File)
+                    {
+                        ProcessFile(item, syncToRemote, syncToLocal, out itemToDelete);
+                    }
+                    if (itemToDelete)
+                    {
+                        _metadataStore.Delete(item.Id);
+                    }
+                    else
+                    {
+                        if (item.Status != ItemStatus.Unchanged)
+                        {
+                            item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                        }
+                    }
+
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Error processing item " + item.Id + ": " + e);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (item.Status != ItemStatus.Unchanged)
+                        {
+                            item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                        }
+                    }
+                    catch (Exception e2)
+                    {
+                        Logger.Log("Cannot postpone item " + item.Id + ": " + e2);
+                    }
+
                 }
             }
             
