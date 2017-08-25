@@ -61,27 +61,35 @@ namespace SPSync
 
         private void DetectChange(FileChange change)
         {
-            if (change.FullPath.EndsWith(".spsync"))
-                return;
-
-            if (Directory.GetParent(change.FullPath).Name == MetadataStore.STOREFOLDER)
-                return;
-
-            lock (_fileChangeQueue)
+            try
             {
-                if (_fileChangeQueue.Count > 0)
+                if (change.FullPath.EndsWith(".spsync"))
+                    return;
+
+                if (Directory.GetParent(change.FullPath).Name == MetadataStore.STOREFOLDER)
+                    return;
+
+                lock (_fileChangeQueue)
                 {
-                    var prevChange = _fileChangeQueue.Peek();
-                    if (prevChange.FullPath == change.FullPath && prevChange.ChangeType == change.ChangeType)
-                        return;
-                }
-                _fileChangeQueue.Enqueue(change);
-                if (!_fileChangeDetectionTimer.Enabled)
-                {
-                    _fileChangeDetectionTimer.Interval = 5000;
-                    _fileChangeDetectionTimer.Start();
+                    if (_fileChangeQueue.Count > 0)
+                    {
+                        var prevChange = _fileChangeQueue.Peek();
+                        if (prevChange.FullPath == change.FullPath && prevChange.ChangeType == change.ChangeType)
+                            return;
+                    }
+                    _fileChangeQueue.Enqueue(change);
+                    if (!_fileChangeDetectionTimer.Enabled)
+                    {
+                        _fileChangeDetectionTimer.Interval = 5000;
+                        _fileChangeDetectionTimer.Start();
+                    }
                 }
             }
+            catch (Exception e)
+            {
+                Logger.Log("DetectChange failed: " + e.ToString());
+            }
+
         }
 
         private void DetectChangeTimer(object sender, System.Timers.ElapsedEventArgs e)
