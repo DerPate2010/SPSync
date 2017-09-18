@@ -13,6 +13,8 @@ using Microsoft.Win32.SafeHandles;
 
 namespace PInvoke
 {
+
+
     public class Win32Api
     {
         #region enums
@@ -87,6 +89,32 @@ namespace PInvoke
             FileHardLinkInformation = 46    // 46    
         }
 
+        [Flags]
+        public enum UsnReason:uint
+        {
+            DATA_OVERWRITE = 0x00000001,
+            DATA_EXTEND = 0x00000002,
+            DATA_TRUNCATION = 0x00000004,
+            NAMED_DATA_OVERWRITE = 0x00000010,
+            NAMED_DATA_EXTEND = 0x00000020,
+            NAMED_DATA_TRUNCATION = 0x00000040,
+            FILE_CREATE = 0x00000100,
+            FILE_DELETE = 0x00000200,
+            EA_CHANGE = 0x00000400,
+            SECURITY_CHANGE = 0x00000800,
+            RENAME_OLD_NAME = 0x00001000,
+            RENAME_NEW_NAME = 0x00002000,
+            INDEXABLE_CHANGE = 0x00004000,
+            BASIC_INFO_CHANGE = 0x00008000,
+            HARD_LINK_CHANGE = 0x00010000,
+            COMPRESSION_CHANGE = 0x00020000,
+            ENCRYPTION_CHANGE = 0x00040000,
+            OBJECT_ID_CHANGE = 0x00080000,
+            REPARSE_POINT_CHANGE = 0x00100000,
+            STREAM_CHANGE = 0x00200000,
+            CLOSE = 0x80000000,
+        }
+
         #endregion
 
         #region constants
@@ -122,27 +150,27 @@ namespace PInvoke
         private const UInt32 FILE_READ_ACCESS = 1;
         private const UInt32 FILE_WRITE_ACCESS = 2;
 
-        public const UInt32 USN_REASON_DATA_OVERWRITE = 0x00000001;
-        public const UInt32 USN_REASON_DATA_EXTEND = 0x00000002;
-        public const UInt32 USN_REASON_DATA_TRUNCATION = 0x00000004;
-        public const UInt32 USN_REASON_NAMED_DATA_OVERWRITE = 0x00000010;
-        public const UInt32 USN_REASON_NAMED_DATA_EXTEND = 0x00000020;
-        public const UInt32 USN_REASON_NAMED_DATA_TRUNCATION = 0x00000040;
-        public const UInt32 USN_REASON_FILE_CREATE = 0x00000100;
-        public const UInt32 USN_REASON_FILE_DELETE = 0x00000200;
-        public const UInt32 USN_REASON_EA_CHANGE = 0x00000400;
-        public const UInt32 USN_REASON_SECURITY_CHANGE = 0x00000800;
-        public const UInt32 USN_REASON_RENAME_OLD_NAME = 0x00001000;
-        public const UInt32 USN_REASON_RENAME_NEW_NAME = 0x00002000;
-        public const UInt32 USN_REASON_INDEXABLE_CHANGE = 0x00004000;
-        public const UInt32 USN_REASON_BASIC_INFO_CHANGE = 0x00008000;
-        public const UInt32 USN_REASON_HARD_LINK_CHANGE = 0x00010000;
-        public const UInt32 USN_REASON_COMPRESSION_CHANGE = 0x00020000;
-        public const UInt32 USN_REASON_ENCRYPTION_CHANGE = 0x00040000;
-        public const UInt32 USN_REASON_OBJECT_ID_CHANGE = 0x00080000;
-        public const UInt32 USN_REASON_REPARSE_POINT_CHANGE = 0x00100000;
-        public const UInt32 USN_REASON_STREAM_CHANGE = 0x00200000;
-        public const UInt32 USN_REASON_CLOSE = 0x80000000;
+        //public const UInt32 USN_REASON_DATA_OVERWRITE = 0x00000001;
+        //public const UInt32 USN_REASON_DATA_EXTEND = 0x00000002;
+        //public const UInt32 USN_REASON_DATA_TRUNCATION = 0x00000004;
+        //public const UInt32 USN_REASON_NAMED_DATA_OVERWRITE = 0x00000010;
+        //public const UInt32 USN_REASON_NAMED_DATA_EXTEND = 0x00000020;
+        //public const UInt32 USN_REASON_NAMED_DATA_TRUNCATION = 0x00000040;
+        //public const UInt32 USN_REASON_FILE_CREATE = 0x00000100;
+        //public const UInt32 USN_REASON_FILE_DELETE = 0x00000200;
+        //public const UInt32 USN_REASON_EA_CHANGE = 0x00000400;
+        //public const UInt32 USN_REASON_SECURITY_CHANGE = 0x00000800;
+        //public const UInt32 USN_REASON_RENAME_OLD_NAME = 0x00001000;
+        //public const UInt32 USN_REASON_RENAME_NEW_NAME = 0x00002000;
+        //public const UInt32 USN_REASON_INDEXABLE_CHANGE = 0x00004000;
+        //public const UInt32 USN_REASON_BASIC_INFO_CHANGE = 0x00008000;
+        //public const UInt32 USN_REASON_HARD_LINK_CHANGE = 0x00010000;
+        //public const UInt32 USN_REASON_COMPRESSION_CHANGE = 0x00020000;
+        //public const UInt32 USN_REASON_ENCRYPTION_CHANGE = 0x00040000;
+        //public const UInt32 USN_REASON_OBJECT_ID_CHANGE = 0x00080000;
+        //public const UInt32 USN_REASON_REPARSE_POINT_CHANGE = 0x00100000;
+        //public const UInt32 USN_REASON_STREAM_CHANGE = 0x00200000;
+        //public const UInt32 USN_REASON_CLOSE = 0x80000000;
 
         public static Int32 GWL_EXSTYLE = -20;
         public static Int32 WS_EX_LAYERED = 0x00080000;
@@ -530,8 +558,8 @@ namespace PInvoke
                 get { return _pfrn; }
             }
 
-            private UInt32 _reason;
-            public UInt32 Reason
+            private UsnReason _reason;
+            public UsnReason Reason
             {
                 get { return _reason; }
             }
@@ -550,7 +578,7 @@ namespace PInvoke
             {
                 get
                 {
-                    if (0 != (_fileAttributes & USN_REASON_RENAME_OLD_NAME))
+                    if (_reason.HasFlag(UsnReason.RENAME_OLD_NAME))
                     {
                         return _oldName;
                     }
@@ -599,7 +627,7 @@ namespace PInvoke
                 _frn = (UInt64)Marshal.ReadInt64(ptrToUsnRecord, FR_OFFSET);
                 _pfrn = (UInt64)Marshal.ReadInt64(ptrToUsnRecord, PFR_OFFSET);
                 _usn = (Int64)Marshal.ReadInt64(ptrToUsnRecord, USN_OFFSET);
-                _reason = (UInt32)Marshal.ReadInt32(ptrToUsnRecord, REASON_OFFSET);
+                _reason = (UsnReason)((UInt32)Marshal.ReadInt32(ptrToUsnRecord, REASON_OFFSET));
                 _fileAttributes = (UInt32)Marshal.ReadInt32(ptrToUsnRecord, FA_OFFSET);
                 short fileNameLength = Marshal.ReadInt16(ptrToUsnRecord, FNL_OFFSET);
                 short fileNameOffset = Marshal.ReadInt16(ptrToUsnRecord, FN_OFFSET);

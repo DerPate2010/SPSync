@@ -24,5 +24,6 @@ namespace SPSync.Core
         public Nullable<long> HasError { get; set; }
         public string LastError { get; set; }
         public Nullable<long> Type { get; set; }
+        public string Rename { get; set; }
     }
 }

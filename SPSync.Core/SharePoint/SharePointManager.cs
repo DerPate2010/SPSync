@@ -13,14 +13,15 @@ using System.Security;
 
 namespace SPSync.Core
 {
-    public class SharePointManager
+
+    public class SharePointManager : IFileSystem
     {
         private SyncConfiguration _configuration;
         private bool? _disableKeepAlive = null;
 
         private SharePointManager() { }
 
-        internal SharePointManager(SyncConfiguration configuration)
+        public SharePointManager(SyncConfiguration configuration)
         {
             _configuration = configuration;
         }
@@ -171,7 +172,7 @@ namespace SPSync.Core
                 context.Load(list, p => p.RootFolder.ServerRelativeUrl, p => p.RootFolder.Name, p => p.RootFolder.Folders);
                 context.ExecuteQuery();
 
-                var subFolderList = GetAllFoldersInternal(context, list.RootFolder);
+                var subFolderList = GetAllFoldersprivate(context, list.RootFolder);
                 subFolderList.ForEach(f =>
                 {
                     var folder = f;
@@ -186,7 +187,7 @@ namespace SPSync.Core
 
         }
 
-        private static List<string> GetAllFoldersInternal(ClientContext context, Folder folder)
+        private static List<string> GetAllFoldersprivate(ClientContext context, Folder folder)
         {
             var folderList = new List<string>();
 
@@ -200,14 +201,14 @@ namespace SPSync.Core
                 context.Load(subFolder, p => p.Folders.Include(f => f.ServerRelativeUrl, f => f.Name));
                 context.ExecuteQuery();
 
-                var subFolderList = GetAllFoldersInternal(context, subFolder);
+                var subFolderList = GetAllFoldersprivate(context, subFolder);
                 folderList.AddRange(subFolderList);
             }
 
             return folderList;
         }
 
-        internal void DeleteFile(int id)
+        public void DeleteFile(int id)
         {
             using (var context = GetClientContext())
             {
@@ -218,19 +219,38 @@ namespace SPSync.Core
             }
         }
 
-        internal void RenameItem(int id, string newName)
+        public void RenameItem(int id, string newName, string relativePath, string name, bool isFolder)
         {
             using (var context = GetClientContext())
             {
                 var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
-                var item = list.GetItemById(id);
+                ListItem item;
+
+                if (id == -1)
+                {
+                    if (isFolder)
+                    {
+                        var folder = context.Web.GetFolderByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
+                        item = folder.ListItemAllFields;
+                    }
+                    else
+                    {
+                        var file = context.Web.GetFileByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
+                        item = file.ListItemAllFields;
+                    }
+                }
+                else
+                {
+                    item = list.GetItemById(id);
+                }
+                
                 item["FileLeafRef"] = newName;
                 item.Update();
                 context.ExecuteQuery();
             }
         }
 
-        internal void InitChangeTokenIfNecessary(Metadata.MetadataStore metadataStore)
+        public void InitChangeTokenIfNecessary(Metadata.MetadataStore metadataStore)
         {
             if (string.IsNullOrEmpty(metadataStore.ChangeToken))
             {
@@ -266,7 +286,7 @@ namespace SPSync.Core
             }
         }
 
-        internal List<SharePointItem> GetChangedFiles(Metadata.MetadataStore metadataStore, Action<int, string> progressHandler, out string newChangeToken)
+        public List<SharePointItem> GetChangedFiles(Metadata.MetadataStore metadataStore, Action<int, string> progressHandler, out string newChangeToken)
         {
             if (string.IsNullOrEmpty(metadataStore.ChangeToken))
             {
@@ -416,7 +436,7 @@ namespace SPSync.Core
             return fileList;
         }
 
-        internal List<SharePointItem> DownloadFileList()
+        public List<SharePointItem> DownloadFileList()
         {
             var fileList = new List<SharePointItem>();
             var fileList2 =0;
@@ -468,7 +488,7 @@ namespace SPSync.Core
             return qry;
         }
 
-        internal DateTime GetFileTimestamp(string relativeFile, out int eTag)
+        public DateTime GetFileTimestamp(string relativeFile, out int eTag)
         {
             eTag = -1;
             try
@@ -489,7 +509,7 @@ namespace SPSync.Core
             { return DateTime.MinValue; }
         }
 
-        internal void DownloadFile(string filename, string targetDirectory, DateTime modifiedDate)
+        public void DownloadFile(string filename, string targetDirectory, DateTime modifiedDate)
         {
             string serverRelativeUrl = GetServerRelativeUrl(targetDirectory, filename);
 
@@ -544,7 +564,7 @@ namespace SPSync.Core
             return GetServerRelativeUrl(relativeFile);
         }
 
-        internal int CreateFolder(string relativePath, string folderName)
+        public int CreateFolder(string relativePath, string folderName)
         {
             CreateFoldersIfNotExists(relativePath);
 
@@ -581,7 +601,7 @@ namespace SPSync.Core
             }
         }
 
-        internal void DeleteFolder(string relativePath, string folderName)
+        public void DeleteFolder(string relativePath, string folderName)
         {
             using (var context = GetClientContext())
             {
@@ -591,7 +611,7 @@ namespace SPSync.Core
             }
         }
 
-        internal int UploadFile(string relativeFile, string localFile)
+        public int UploadFile(string relativeFile, string localFile)
         {
             try
             {
@@ -719,7 +739,7 @@ namespace SPSync.Core
 
         }
 
-        internal void CreateFoldersIfNotExists(string relFolder)
+        public void CreateFoldersIfNotExists(string relFolder)
         {
             Logger.LogDebug(Guid.Empty, Guid.Empty, "(CreateFoldersIfNotExists) relFolder={0}", relFolder);
             using (var context = GetClientContext())
@@ -759,5 +779,6 @@ namespace SPSync.Core
                 }
             }
         }
+
     }
 }

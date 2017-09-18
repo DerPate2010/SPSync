@@ -14,6 +14,8 @@ namespace SPSync.Core.Common
         DeletedRemote = 4,
         Conflict = 5,
         RenamedRemote = 6,
-        RenamedLocal = 7
+        RenamedLocal = 7,
+        MovedRemote = 8,
+        MovedLocal = 9
     }
 }

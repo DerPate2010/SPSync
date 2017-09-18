@@ -1,13 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Reflection;
 using SPSync.Core;
 using System.Threading;
 using SPSync.Core.Common;
 using SPSync.Core.Metadata;
 using System.Threading.Tasks;
+using System.Windows;
 
 namespace SPSync
 {
@@ -158,12 +161,14 @@ namespace SPSync
                 Sync(confItem.Value);
             }
         }
-        internal void StopAll()
+        internal Task StopAll()
         {
+            var tasks = new List<Task>();
             foreach (var manager in _syncManagers)
             {
-                manager.Value.Stop();
+                tasks.Add(manager.Value.Stop());
             }
+            return Task.WhenAll(tasks);
         }
 
         private void manager_ItemProgress(object sender, ItemProgressEventArgs e)

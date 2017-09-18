@@ -148,11 +148,13 @@
     <Compile Include="Common\EventArgs.cs" />
     <Compile Include="Enums\ProgressStatus.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SharePoint\IFileSystem.cs" />
     <Compile Include="SharePoint\SharePointItem.cs" />
     <Compile Include="SharePoint\SharePointManager.cs" />
     <Compile Include="SyncConfiguration.cs" />
     <Compile Include="Common\SyncConfigurationNotFoundException.cs" />
     <Compile Include="SyncManager.cs" />
+    <Compile Include="UsnEntry.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

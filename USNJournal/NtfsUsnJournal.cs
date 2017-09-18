@@ -760,7 +760,7 @@ namespace UsnJournal
         /// </remarks>
         public UsnJournalReturnCode
             GetUsnJournalEntries(Win32Api.USN_JOURNAL_DATA previousUsnState,
-            UInt32 reasonMask,
+            Win32Api.UsnReason reasonMask,
             out List<Win32Api.UsnEntry> usnEntries,
             out Win32Api.USN_JOURNAL_DATA newUsnState)
         {
@@ -790,7 +790,7 @@ namespace UsnJournal
 
                         Win32Api.READ_USN_JOURNAL_DATA rujd = new Win32Api.READ_USN_JOURNAL_DATA();
                         rujd.StartUsn = previousUsnState.NextUsn;
-                        rujd.ReasonMask = reasonMask;
+                        rujd.ReasonMask = (uint)reasonMask;
                         rujd.ReturnOnlyOnClose = 0;
                         rujd.Timeout = 0;
                         rujd.bytesToWaitFor = 0;

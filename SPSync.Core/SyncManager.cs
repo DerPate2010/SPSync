@@ -15,20 +15,12 @@ using UsnJournal;
 
 namespace SPSync.Core
 {
-    public class UsnEntry
-    {
-        public ulong FileRefNumber { get; set; }
-        public string Path { get; set; }
-        public string NewPath { get; set; }
-        public uint ChangeType { get; set; }
-    }
-
     public class SyncManager
     {
         private string _localFolder;
         private string _originalFolder;
         private SyncConfiguration _configuration;
-        private SharePointManager _sharePointManager;
+        private IFileSystem _sharePointManager;
         private MetadataStore _metadataStore;
         private CancellationTokenSource _syncCancellation;
         private AutoResetEvent _syncEvent;
@@ -152,25 +144,25 @@ namespace SPSync.Core
         {
             Guid correlationId = Guid.NewGuid();
             var  driveLetter= Path.GetPathRoot(_localFolder).TrimEnd('\\');
-            uint reasonMask = Win32Api.USN_REASON_DATA_OVERWRITE |
-                              Win32Api.USN_REASON_DATA_EXTEND |
-                              Win32Api.USN_REASON_NAMED_DATA_OVERWRITE |
-                              Win32Api.USN_REASON_NAMED_DATA_TRUNCATION |
-                              Win32Api.USN_REASON_FILE_CREATE |
-                              Win32Api.USN_REASON_FILE_DELETE |
-                              Win32Api.USN_REASON_EA_CHANGE |
-                              Win32Api.USN_REASON_SECURITY_CHANGE |
-                              Win32Api.USN_REASON_RENAME_OLD_NAME |
-                              Win32Api.USN_REASON_RENAME_NEW_NAME |
-                              Win32Api.USN_REASON_INDEXABLE_CHANGE |
-                              Win32Api.USN_REASON_BASIC_INFO_CHANGE |
-                              Win32Api.USN_REASON_HARD_LINK_CHANGE |
-                              Win32Api.USN_REASON_COMPRESSION_CHANGE |
-                              Win32Api.USN_REASON_ENCRYPTION_CHANGE |
-                              Win32Api.USN_REASON_OBJECT_ID_CHANGE |
-                              Win32Api.USN_REASON_REPARSE_POINT_CHANGE |
-                              Win32Api.USN_REASON_STREAM_CHANGE |
-                              Win32Api.USN_REASON_CLOSE;
+            Win32Api.UsnReason reasonMask = Win32Api.UsnReason.DATA_OVERWRITE |
+                              Win32Api.UsnReason.DATA_EXTEND |
+                              Win32Api.UsnReason.NAMED_DATA_OVERWRITE |
+                              Win32Api.UsnReason.NAMED_DATA_TRUNCATION |
+                              Win32Api.UsnReason.FILE_CREATE |
+                              Win32Api.UsnReason.FILE_DELETE |
+                              Win32Api.UsnReason.EA_CHANGE |
+                              Win32Api.UsnReason.SECURITY_CHANGE |
+                              Win32Api.UsnReason.RENAME_OLD_NAME |
+                              Win32Api.UsnReason.RENAME_NEW_NAME |
+                              Win32Api.UsnReason.INDEXABLE_CHANGE |
+                              Win32Api.UsnReason.BASIC_INFO_CHANGE |
+                              Win32Api.UsnReason.HARD_LINK_CHANGE |
+                              Win32Api.UsnReason.COMPRESSION_CHANGE |
+                              Win32Api.UsnReason.ENCRYPTION_CHANGE |
+                              Win32Api.UsnReason.OBJECT_ID_CHANGE |
+                              Win32Api.UsnReason.REPARSE_POINT_CHANGE |
+                              Win32Api.UsnReason.STREAM_CHANGE |
+                              Win32Api.UsnReason.CLOSE;
 
             Win32Api.USN_JOURNAL_DATA newUsnState;
             List<Win32Api.UsnEntry> usnEntries;
@@ -195,22 +187,29 @@ namespace SPSync.Core
                     if (usnRtnCode == NtfsUsnJournal.UsnJournalReturnCode.USN_JOURNAL_SUCCESS &&
                         0 != string.Compare(path, "Unavailable", true))
                     {
-                        if (usnEntry.IsFile && !string.IsNullOrEmpty(usnEntry.Name))
+                        if ((usnEntry.IsFile || usnEntry.IsFolder) && !string.IsNullOrEmpty(usnEntry.Name))
                         {
                             string fullPath = driveLetter + Path.Combine(path, usnEntry.Name);
                             if (fullPath.ToLowerInvariant().StartsWith(_localFolder.ToLowerInvariant()) &&
                                 !fullPath.Contains(".spsync"))
                             {
-                                if (usnEntry.Reason == Win32Api.USN_REASON_RENAME_NEW_NAME)
+                                if (usnEntry.Reason.HasFlag(Win32Api.UsnReason.RENAME_NEW_NAME))
                                 {
                                     var rename =
                                         changes.FirstOrDefault(
                                             c => c.FileRefNumber == usnEntry.FileReferenceNumber &&
-                                                 c.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME);
+                                                 c.ChangeType.HasFlag(Win32Api.UsnReason.RENAME_OLD_NAME));
                                     if (rename != null)
                                     {
                                         rename.NewPath = fullPath;
                                     }
+                                    changes.Add(new UsnEntry()
+                                    {
+                                        Path = fullPath,
+                                        ChangeType = Win32Api.UsnReason.FILE_CREATE,
+                                        FileRefNumber = usnEntry.FileReferenceNumber,
+                                        Type = usnEntry.IsFile ? ItemType.File : ItemType.Folder,
+                                    });
                                 }
                                 else
                                 {
@@ -219,6 +218,7 @@ namespace SPSync.Core
                                         Path = fullPath,
                                         ChangeType = usnEntry.Reason,
                                         FileRefNumber = usnEntry.FileReferenceNumber,
+                                        Type = usnEntry.IsFile ? ItemType.File: ItemType.Folder,
                                     });
                                 }
                             }
@@ -236,9 +236,7 @@ namespace SPSync.Core
             {
                 try
                 {
-
-
-                    if ((change.ChangeType & Win32Api.USN_REASON_CLOSE) > 0)
+                    if (change.ChangeType.HasFlag(Win32Api.UsnReason.CLOSE))
                     {
                         continue;
                     }
@@ -248,33 +246,48 @@ namespace SPSync.Core
 
                     if (item == null)
                     {
-                        if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE)
+                        if (change.ChangeType.HasFlag(Win32Api.UsnReason.FILE_DELETE))
                         {
 
                         }
                         else
                         {
-                            if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                            if (change.ChangeType.HasFlag(Win32Api.UsnReason.RENAME_OLD_NAME))
                             {
                                 localFile = change.NewPath;
                             }
-                            _metadataStore.Add(new MetadataItem(localFile, ItemType.File));
+                            _metadataStore.Add(new MetadataItem(localFile, change.Type));
                         }
                     }
                     else
                     {
-                        if (change.ChangeType == Win32Api.USN_REASON_FILE_DELETE ||
-                            change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                        if (change.ChangeType.HasFlag(Win32Api.UsnReason.FILE_DELETE))
                         {
                             item.Status = ItemStatus.DeletedLocal;
                         }
-                        else if (change.ChangeType == Win32Api.USN_REASON_RENAME_OLD_NAME)
+                        else if (change.ChangeType.HasFlag(Win32Api.UsnReason.RENAME_OLD_NAME))
                         {
-                            item.NewNameAfterRename = Path.GetFileName(change.NewPath); //works for directories as well
-                            item.Status = ItemStatus.RenamedLocal;
-
-                            if (item.Type == ItemType.Folder)
+                            if (string.IsNullOrEmpty(change.NewPath))
                             {
+                                item.Status = ItemStatus.DeletedLocal;
+                            }
+                            else
+                            {
+                                var oldPath = Path.GetDirectoryName(change.Path);
+                                var newPath = Path.GetDirectoryName(change.NewPath);
+                                if (oldPath != newPath)
+                                {
+                                    item.Status = ItemStatus.MovedLocal;
+                                    item.NewNameAfterRename = change.NewPath;
+                                }
+                                else
+                                {
+
+                                    item.NewNameAfterRename =
+                                        Path.GetFileName(change.NewPath); //works for directories as well
+                                    item.Status = ItemStatus.RenamedLocal;
+                                }
+
                                 foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
                                 {
                                     if (itemInFolder.Id == item.Id)
@@ -563,6 +576,8 @@ namespace SPSync.Core
             _metadataStore.MetadataCompleted = true;
 
             _metadataStore.Save();
+
+            _syncEvent.Set();
 
             OnMetadataProgress(100, ItemType.Unknown, ProgressStatus.Completed);
         }
@@ -918,7 +933,7 @@ namespace SPSync.Core
 
                     try
                     {
-                        _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename);
+                        _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename,relFolder,item.Name,item.Type==ItemType.Folder);
 
                         item.Name = item.NewNameAfterRename;
                         item.Status = ItemStatus.Unchanged;
@@ -1036,7 +1051,7 @@ namespace SPSync.Core
 
                 try
                 {
-                    _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename);
+                    _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename, relFolder, item.Name, item.Type==ItemType.Folder);
 
                     item.Name = item.NewNameAfterRename;
                     item.Status = ItemStatus.Unchanged;

@@ -19,6 +19,7 @@
           <Property Name="HasError" Type="integer" />
           <Property Name="LastError" Type="nvarchar" MaxLength="2147483647" />
           <Property Name="Type" Type="integer" />
+          <Property Name="Rename" Type="nvarchar" MaxLength="2147483647" />
         </EntityType>
         <EntityContainer Name="MetadataStoreModelStoreContainer">
           <EntitySet Name="MetadataStore" EntityType="Self.MetadataStore" store:Type="Tables" />
@@ -42,6 +43,7 @@
           <Property Name="HasError" Type="Int64" />
           <Property Name="LastError" Type="String" MaxLength="2147483647" FixedLength="false" Unicode="true" />
           <Property Name="Type" Type="Int64" />
+          <Property Name="Rename" Type="String" MaxLength="2147483647" FixedLength="false" Unicode="true" />
         </EntityType>
         <EntityContainer Name="MetadataStoreEntities" annotation:LazyLoadingEnabled="true">
           <EntitySet Name="MetadataStore" EntityType="MetadataStoreModel.MetadataItemDb" />
@@ -55,6 +57,7 @@
           <EntitySetMapping Name="MetadataStore">
             <EntityTypeMapping TypeName="MetadataStoreModel.MetadataItemDb">
               <MappingFragment StoreEntitySet="MetadataStore">
+                <ScalarProperty Name="Rename" ColumnName="Rename" />
                 <ScalarProperty Name="Id" ColumnName="Id" />
                 <ScalarProperty Name="SharePointId" ColumnName="SharePointId" />
                 <ScalarProperty Name="LocalFolder" ColumnName="LocalFolder" />

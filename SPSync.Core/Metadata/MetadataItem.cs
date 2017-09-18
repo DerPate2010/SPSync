@@ -15,6 +15,7 @@ namespace SPSync.Core.Metadata
         private readonly MetadataStore _metadataStore;
         private ItemStatus _status;
         private bool _isLoading;
+        private string _localFolder;
         public MetadataItem() { }
 
         internal MetadataItem(string localPath, ItemType type)
@@ -75,7 +76,11 @@ namespace SPSync.Core.Metadata
 
         public int SharePointId { get; set; }
 
-        public string LocalFolder { get; set; }
+        public string LocalFolder
+        {
+            get { return _localFolder; }
+            set { _localFolder = value; OnPropertyChanged(); }
+        }
 
         public string LocalFile => Path.Combine(LocalFolder, Name);
 
@@ -311,6 +316,7 @@ namespace SPSync.Core.Metadata
             item.LastModified = LastModified.ToBinary();
             item.Status = (long)Status;
             item.Type = (long)Type;
+            item.Rename = NewNameAfterRename;
         }
         internal void FromDb(MetadataItemDb item)
         {
@@ -325,6 +331,7 @@ namespace SPSync.Core.Metadata
             LastModified = DateTime.FromBinary(item.LastModified.GetValueOrDefault());
             Status = (ItemStatus) item.Status.GetValueOrDefault();
             Type = (ItemType) item.Type.GetValueOrDefault();
+            NewNameAfterRename = item.Rename;
             _isLoading = false;
         }
     }

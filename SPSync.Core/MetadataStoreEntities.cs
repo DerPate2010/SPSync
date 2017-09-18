@@ -20,9 +20,4 @@ namespace SPSync.Core
             
         }
     }
-
-    partial class MetadataItemDb
-    {
-
-    }
 }

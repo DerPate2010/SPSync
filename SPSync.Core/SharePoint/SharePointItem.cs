@@ -7,7 +7,7 @@ using SPSync.Core.Common;
 
 namespace SPSync.Core
 {
-    internal class SharePointItem
+    public class SharePointItem
     {
         public int Id { get; set; }
         public string Name { get; set; }

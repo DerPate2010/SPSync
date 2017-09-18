@@ -6,9 +6,11 @@ using Hardcodet.Wpf.TaskbarNotification;
 using SPSync.Core;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using SPSync.Core.Common;
 using SPSync.Core.Metadata;
 using System.Net;
+using System.Reflection;
 using System.Windows;
 using System.Threading.Tasks;
 
@@ -19,6 +21,7 @@ namespace SPSync
         private SyncService syncService;
         internal bool IsInitialized { get; private set; }
         private ObservableCollection<SyncViewModel> syncModels;
+        private Task _restartTask;
         internal Dictionary<string, ItemStatus> AllNextConflictsCache { get; private set; }
 
         public event EventHandler<NotifyStatusEventArgs> NotifyStatus;
@@ -97,10 +100,23 @@ namespace SPSync
         internal void SyncAll()
         {
             syncService.SyncAll();
+            _restartTask = RestartDelayedAsync();
         }
-        internal void StopAll()
+
+        private async Task RestartDelayedAsync()
         {
-            syncService.StopAll();
+            await Task.Delay(TimeSpan.FromHours(12));
+            var timeout = Task.Delay(TimeSpan.FromMinutes(10));
+            var stop = StopAll();
+            await Task.WhenAny(stop, timeout);
+            var asm = Assembly.GetEntryAssembly();
+            Process.Start(asm.Location);
+            Application.Current.Shutdown();
+        }
+
+        internal Task StopAll()
+        {
+            return syncService.StopAll();
         }
 
         public ObservableCollection<SyncViewModel> SyncModels => syncModels;
