@@ -223,31 +223,58 @@ namespace SPSync.Core
         {
             using (var context = GetClientContext())
             {
-                var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
-                ListItem item;
+                ListItem item = GetItemByIdOrUrl(id, relativePath, name, isFolder, context);
 
-                if (id == -1)
-                {
-                    if (isFolder)
-                    {
-                        var folder = context.Web.GetFolderByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
-                        item = folder.ListItemAllFields;
-                    }
-                    else
-                    {
-                        var file = context.Web.GetFileByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
-                        item = file.ListItemAllFields;
-                    }
-                }
-                else
-                {
-                    item = list.GetItemById(id);
-                }
-                
                 item["FileLeafRef"] = newName;
                 item.Update();
                 context.ExecuteQuery();
             }
+        }
+        public void MoveItem(int id, string newPath, string relativePath, string name, bool isFolder)
+        {
+            using (var context = GetClientContext())
+            {
+                var newUrl = GetServerRelativeUrl(newPath);
+                if (isFolder)
+                {
+                    var oldUrl = GetServerRelativeUrl(relativePath + "/" + name);
+                    var absoluteUrl = new Uri(context.Url).GetLeftPart(UriPartial.Authority); 
+                    MoveCopyUtil.MoveFolder(context, absoluteUrl + oldUrl, absoluteUrl + newUrl);
+                }
+                else
+                {
+                    ListItem item = GetItemByIdOrUrl(id, relativePath, name, isFolder, context);
+                    item.File.MoveTo(newUrl, MoveOperations.Overwrite);
+                }
+                //
+                context.ExecuteQuery();
+            }
+        }
+
+        private ListItem GetItemByIdOrUrl(int id, string relativePath, string name, bool isFolder, ClientContext context)
+        {
+            var list = context.Web.Lists.GetByTitle(_configuration.DocumentLibrary);
+            ListItem item;
+
+            if (id == -1)
+            {
+                if (isFolder)
+                {
+                    var folder = context.Web.GetFolderByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
+                    item = folder.ListItemAllFields;
+                }
+                else
+                {
+                    var file = context.Web.GetFileByServerRelativeUrl(GetServerRelativeUrl(relativePath + "/" + name));
+                    item = file.ListItemAllFields;
+                }
+            }
+            else
+            {
+                item = list.GetItemById(id);
+            }
+
+            return item;
         }
 
         public void InitChangeTokenIfNecessary(Metadata.MetadataStore metadataStore)
@@ -488,20 +515,39 @@ namespace SPSync.Core
             return qry;
         }
 
-        public DateTime GetFileTimestamp(string relativeFile, out int eTag)
+        public DateTime GetFileTimestamp(string relativeFile, out int eTag, out int id)
         {
             eTag = -1;
+            id = -1;
             try
             {
                 using (var context = GetClientContext())
                 {
                     var file = context.Web.GetFileByServerRelativeUrl(GetServerRelativeUrl(relativeFile));
-                    context.Load(file);
+                    context.Load(file, f => f.ListItemAllFields.Id, f => f.ETag, f => f.TimeLastModified);
                     context.ExecuteQuery();
 
                     if (!string.IsNullOrEmpty(file.ETag))
                         eTag = ParseETag(file.ETag);
+                    id = file.ListItemAllFields.Id;
+                    return file.TimeLastModified;
+                }
+            }
+            catch
+            { return DateTime.MinValue; }
+        }
+        public DateTime GetFolderTimestamp(string relativeFile, out int id)
+        {
+            id = -1;
+            try
+            {
+                using (var context = GetClientContext())
+                {
+                    var file = context.Web.GetFolderByServerRelativeUrl(GetServerRelativeUrl(relativeFile));
+                    context.Load(file, f => f.ListItemAllFields.Id, f => f.TimeLastModified);
+                    context.ExecuteQuery();
 
+                    id = file.ListItemAllFields.Id;
                     return file.TimeLastModified;
                 }
             }

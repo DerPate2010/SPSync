@@ -108,7 +108,7 @@ namespace SPSync.Core.Metadata
             }
             else
             {
-                _metadataStore.Update(this);
+                _metadataStore?.Update(this);
             }
             
         }

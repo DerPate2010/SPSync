@@ -203,13 +203,16 @@ namespace SPSync.Core
                                     {
                                         rename.NewPath = fullPath;
                                     }
-                                    changes.Add(new UsnEntry()
+                                    else
                                     {
-                                        Path = fullPath,
-                                        ChangeType = Win32Api.UsnReason.FILE_CREATE,
-                                        FileRefNumber = usnEntry.FileReferenceNumber,
-                                        Type = usnEntry.IsFile ? ItemType.File : ItemType.Folder,
-                                    });
+                                        changes.Add(new UsnEntry()
+                                        {
+                                            Path = fullPath,
+                                            ChangeType = Win32Api.UsnReason.FILE_CREATE,
+                                            FileRefNumber = usnEntry.FileReferenceNumber,
+                                            Type = usnEntry.IsFile ? ItemType.File : ItemType.Folder,
+                                        });
+                                    }
                                 }
                                 else
                                 {
@@ -236,7 +239,7 @@ namespace SPSync.Core
             {
                 try
                 {
-                    if (change.ChangeType.HasFlag(Win32Api.UsnReason.CLOSE))
+                    if (change.ChangeType==Win32Api.UsnReason.CLOSE)
                     {
                         continue;
                     }
@@ -256,7 +259,10 @@ namespace SPSync.Core
                             {
                                 localFile = change.NewPath;
                             }
-                            _metadataStore.Add(new MetadataItem(localFile, change.Type));
+                            if (localFile != null)
+                            {
+                                _metadataStore.Add(new MetadataItem(localFile, change.Type));
+                            }
                         }
                     }
                     else
@@ -277,8 +283,8 @@ namespace SPSync.Core
                                 var newPath = Path.GetDirectoryName(change.NewPath);
                                 if (oldPath != newPath)
                                 {
-                                    item.Status = ItemStatus.MovedLocal;
                                     item.NewNameAfterRename = change.NewPath;
+                                    item.Status = ItemStatus.MovedLocal;
                                 }
                                 else
                                 {
@@ -502,9 +508,35 @@ namespace SPSync.Core
                         return;
 
                     var item = _metadataStore.GetByFileName(localFolder);
+
                     if (item == null)
                     {
-                        _metadataStore.Add(new MetadataItem(localFolder, ItemType.Folder));
+                        var relFile = localFolder.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                        item = new MetadataItem(localFolder, ItemType.Folder);
+                        var localTime = File.GetLastWriteTimeUtc(item.LocalFile);
+                        try
+                        {
+                            int id;
+                            var remoteTime = _sharePointManager.GetFolderTimestamp(relFile, out id);
+                            item.SharePointId = id;
+                            if (id == -1)
+                            {
+                                item.LastModified = localTime;
+                                item.Status = ItemStatus.UpdatedLocal;
+                            }
+                            else
+                            {
+                                item.LastModified = localTime;
+                                item.Status = ItemStatus.Unchanged;
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            item.LastModified = localTime;
+                            item.Status = ItemStatus.UpdatedLocal;
+                        }
+
+                        _metadataStore.Add(item);
                     }
                     else
                     {
@@ -544,7 +576,35 @@ namespace SPSync.Core
                     var item = _metadataStore.GetByFileName(localFile);
                     if (item == null)
                     {
-                        _metadataStore.Add(new MetadataItem(localFile, ItemType.File));
+                        var relFile = localFile.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                        item = new MetadataItem(localFile, ItemType.File);
+                        var localTime = File.GetLastWriteTimeUtc(item.LocalFile);
+                        try
+                        {
+                            int eTag;
+                            int id;
+                            var remoteTime = _sharePointManager.GetFileTimestamp(relFile, out eTag, out id);
+                            item.SharePointId = id;
+                            item.ETag = eTag;
+                            if (remoteTime < localTime)
+                            {
+                                item.LastModified = localTime;
+                                item.Status = ItemStatus.UpdatedLocal;
+                            }
+                            else
+                            {
+                                item.LastModified = remoteTime;
+                                item.Status = ItemStatus.Unchanged;
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            item.LastModified = localTime;
+                            item.Status = ItemStatus.UpdatedLocal;
+                        }
+
+
+                        _metadataStore.Add(item);
                     }
                     else
                     {
@@ -811,7 +871,7 @@ namespace SPSync.Core
                         Logger.LogDebug("File uploaded with id: {0}", id);
 
                         int etag;
-                        var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
+                        var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag, out id);
                         item.ETag = etag;
                         Logger.LogDebug("Got ETag from remote file: {0}", etag);
 
@@ -829,7 +889,8 @@ namespace SPSync.Core
                     string fullNameNotSynchronized = item.LocalFile + ".spsync";
 
                     int etag;
-                    var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag);
+                    int id;
+                    var remoteTimestamp = _sharePointManager.GetFileTimestamp(relFile, out etag, out id);
                     item.ETag = etag;
                     item.LastModified = remoteTimestamp;
 
@@ -933,9 +994,27 @@ namespace SPSync.Core
 
                     try
                     {
-                        _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename,relFolder,item.Name,item.Type==ItemType.Folder);
+                        _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename, relFolder, item.Name, item.Type == ItemType.Folder);
 
                         item.Name = item.NewNameAfterRename;
+                        item.NewNameAfterRename = null;
+                        item.Status = ItemStatus.Unchanged;
+                    }
+                    catch (IOException ex)
+                    {
+                        OnLockedFile(item);
+                    }
+                }
+                else if (item.Status == ItemStatus.MovedLocal)
+                {
+
+                    try
+                    {
+                        var newUrl=item.NewNameAfterRename.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                        _sharePointManager.MoveItem(item.SharePointId, newUrl, relFolder, item.Name, item.Type == ItemType.Folder);
+
+                        item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
+                        item.NewNameAfterRename = null;
                         item.Status = ItemStatus.Unchanged;
                     }
                     catch (IOException ex)
@@ -1012,6 +1091,12 @@ namespace SPSync.Core
                 try
                 {
                     _sharePointManager.DeleteFolder(relFolder, item.Name);
+                    foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                    {
+                        if (itemInFolder.Id == item.Id)
+                            continue;
+                        _metadataStore.Delete(itemInFolder.Id);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1023,6 +1108,13 @@ namespace SPSync.Core
 
                 if (Directory.Exists(item.LocalFile))
                     FileHelper.RecycleDirectory(item.LocalFile);
+
+                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                {
+                    if (itemInFolder.Id == item.Id)
+                        continue;
+                    _metadataStore.Delete(itemInFolder.Id);
+                }
 
                 itemToDelete = true;
             }
@@ -1051,9 +1143,26 @@ namespace SPSync.Core
 
                 try
                 {
-                    _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename, relFolder, item.Name, item.Type==ItemType.Folder);
+                    _sharePointManager.RenameItem(item.SharePointId, item.NewNameAfterRename, relFolder, item.Name, item.Type == ItemType.Folder);
 
                     item.Name = item.NewNameAfterRename;
+                    item.Status = ItemStatus.Unchanged;
+                }
+                catch (IOException ex)
+                {
+                    OnLockedFile(item);
+                }
+            }
+            else if (item.Status == ItemStatus.MovedLocal)
+            {
+
+                try
+                {
+                    var newUrl = item.NewNameAfterRename.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                    _sharePointManager.MoveItem(item.SharePointId, newUrl, relFolder, item.Name, item.Type == ItemType.Folder);
+
+                    item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
+                    item.NewNameAfterRename = null;
                     item.Status = ItemStatus.Unchanged;
                 }
                 catch (IOException ex)
