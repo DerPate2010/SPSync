@@ -333,6 +333,8 @@ namespace SPSync.Core.Metadata
         }
 
         public const int POSTPONE_OFFSET = 1000;
+        public const int LOCALCOMMIT_OFFSET = 2000;
+        public const int REMOTECOMMIT_OFFSET = 3000;
 
         internal IEnumerable<MetadataItem> ItemsUnchangedNoError(ItemType type)
         {

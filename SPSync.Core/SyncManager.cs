@@ -234,6 +234,7 @@ namespace SPSync.Core
                                ": " + e.ToString());
                 }
             }
+            changes.ForEach(c => Debug.WriteLine($"{c.ChangeType} {c.Path} {c.FileRefNumber}"));
 
             foreach (var change in changes)
             {
@@ -261,7 +262,11 @@ namespace SPSync.Core
                             }
                             if (localFile != null)
                             {
-                                _metadataStore.Add(new MetadataItem(localFile, change.Type));
+                                item = _metadataStore.GetByFileName(localFile);
+                                if (item ==null)
+                                {
+                                    _metadataStore.Add(new MetadataItem(localFile, change.Type));
+                                }
                             }
                         }
                     }
@@ -716,6 +721,24 @@ namespace SPSync.Core
                                 }
                             }
                         }
+                        else if (item.LocalFile != localFile)
+                        {
+                            item.NewNameAfterRename = localFile;
+                            item.Status = ItemStatus.MovedRemote;
+
+
+                            if (item.Type == ItemType.Folder)
+                            {
+                                foreach (var itemInFolder in _metadataStore.ItemsInDirSub(item.LocalFile))
+                                {
+                                    if (itemInFolder.Id == item.Id)
+                                        continue;
+                                    var newFolder = _localFolder + remoteItem.FullFileName.Substring(1);
+                                    itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, newFolder);
+                                    itemInFolder.HasError = true;
+                                }
+                            }
+                        }
                         else
                         {
                             item.Status = ItemStatus.Unchanged;
@@ -1010,11 +1033,36 @@ namespace SPSync.Core
 
                     try
                     {
-                        var newUrl=item.NewNameAfterRename.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
+                        var newUrl = item.NewNameAfterRename.Replace(_localFolder, string.Empty).TrimStart('.', '\\');
                         _sharePointManager.MoveItem(item.SharePointId, newUrl, relFolder, item.Name, item.Type == ItemType.Folder);
 
                         item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
                         item.NewNameAfterRename = null;
+                        item.Status = ItemStatus.Unchanged;
+                    }
+                    catch (IOException ex)
+                    {
+                        OnLockedFile(item);
+                    }
+                }
+                else if (item.Status == ItemStatus.MovedRemote)
+                {
+
+
+                    try
+                    {
+                        if (File.Exists(item.LocalFile))
+                        {
+                            File.Move(item.LocalFile, item.NewNameAfterRename);
+                            item.LastModified = File.GetLastWriteTimeUtc(item.NewNameAfterRename);
+                        }
+                        if (File.Exists(item.LocalFile + ".spsync"))
+                        {
+                            File.Move(item.LocalFile + ".spsync", item.NewNameAfterRename + ".spsync");
+                            item.LastModified = File.GetLastWriteTimeUtc(item.NewNameAfterRename + ".spsync");
+                        }
+
+                        item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
                         item.Status = ItemStatus.Unchanged;
                     }
                     catch (IOException ex)
@@ -1163,6 +1211,26 @@ namespace SPSync.Core
 
                     item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
                     item.NewNameAfterRename = null;
+                    item.Status = ItemStatus.Unchanged;
+                }
+                catch (IOException ex)
+                {
+                    OnLockedFile(item);
+                }
+            }
+            else if (item.Status == ItemStatus.MovedRemote)
+            {
+
+
+                try
+                {
+                    if (Directory.Exists(item.LocalFile))
+                    {
+                        Directory.Move(item.LocalFile, item.NewNameAfterRename);
+                        item.LastModified = Directory.GetLastWriteTimeUtc(item.NewNameAfterRename);
+                    }
+
+                    item.LocalFolder = Path.GetDirectoryName(item.NewNameAfterRename);
                     item.Status = ItemStatus.Unchanged;
                 }
                 catch (IOException ex)

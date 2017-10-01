@@ -375,7 +375,6 @@ namespace SPSync.Core
                 foreach (var change in changes)
                 {
                     var changedItem = (ChangeItem)change;
-
                     Logger.LogDebug("ChangeItem: {0} ChangeType: {1}", changedItem.ItemId, changedItem.ChangeType);
 
                     if (changedItem.ChangeType == ChangeType.DeleteObject)
@@ -400,6 +399,7 @@ namespace SPSync.Core
                             // File
                             if (changedListItem.File.IsPropertyAvailable("ServerRelativeUrl"))
                             {
+
                                 var folder = changedListItem.File.ServerRelativeUrl;
                                 folder = folder.Replace(changedListItem.File.Name, string.Empty);
                                 folder = folder.Replace(list.DefaultViewUrl.Substring(0, list.DefaultViewUrl.IndexOf("/Forms/")), string.Empty);
@@ -418,6 +418,11 @@ namespace SPSync.Core
                                 folder = folder.EndsWith("\\") ? folder : folder + "\\";
 
                                 tempFileList.Add(new SharePointItem(changedItem.ItemId, ItemType.Folder, changedItem.ChangeType, changedListItem.Folder.Name, null, (DateTime)changedListItem["Modified"], "." + folder + changedListItem.Folder.Name));
+
+                                if (changedItem.ChangeType == ChangeType.Add)
+                                {
+                                    AddSubFiles(context, changedListItem.Folder, list, tempFileList);
+                                }
                             }
                         }
                         catch (ServerException ex)
@@ -461,6 +466,30 @@ namespace SPSync.Core
             }
 
             return fileList;
+        }
+
+        private static void AddSubFiles(ClientContext context, Folder folder, List list, List<SharePointItem> tempFileList)
+        {
+            context.Load(folder.Files,
+                f => f.Include(p => p.ServerRelativeUrl, p => p.Name, p => p.ETag, p => p.TimeLastModified, p => p.ListItemAllFields.Id));
+            context.Load(folder.Folders);
+            context.ExecuteQuery();
+            foreach (var subFile in folder.Files)
+            {
+                var folder2 = subFile.ServerRelativeUrl;
+                folder2 = folder2.Replace(subFile.Name, string.Empty);
+                folder2 = folder2.Replace(list.DefaultViewUrl.Substring(0, list.DefaultViewUrl.IndexOf("/Forms/")),
+                    string.Empty);
+                folder2 = folder2.Replace("/", "\\");
+                folder2 = folder2.EndsWith("\\") ? folder2 : folder2 + "\\";
+
+                tempFileList.Add(new SharePointItem(subFile.ListItemAllFields.Id, ItemType.File, ChangeType.Add, subFile.Name,
+                    subFile.ETag, subFile.TimeLastModified, "." + folder2 + subFile.Name));
+            }
+            foreach (var subFolder in folder.Folders)
+            {
+                AddSubFiles(context,subFolder,list, tempFileList);
+            }
         }
 
         public List<SharePointItem> DownloadFileList()
