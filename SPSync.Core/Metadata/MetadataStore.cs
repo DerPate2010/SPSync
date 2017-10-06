@@ -116,7 +116,7 @@ namespace SPSync.Core.Metadata
             }
             try
             {
-                IgnorePattern = new string[] {"*.bak"};
+                IgnorePattern = new string[] {"*.bak", "~*.*", "*.tmp", "*200" };
                 IgnorePattern = File.ReadAllLines(Path.Combine(storeFolder, IGNORE_FILE));
             }
             catch (Exception ex)
@@ -386,7 +386,9 @@ namespace SPSync.Core.Metadata
             MetadataItemDb itemDb;
             lock (_lock)
             {
-              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && p.HasError == 0 && p.Status<1000);
+              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && 
+              //p.HasError == 0 && 
+              p.Status<1000);
                 if (itemDb != null && itemDb.Status.GetValueOrDefault() == (long) ItemStatus.Unchanged)
                 {
                     Load();

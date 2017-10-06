@@ -93,7 +93,12 @@ namespace SPSync.Core.Metadata
         public ItemStatus Status
         {
             get { return _status; }
-            set { _status = value;
+            set {
+                if (!_isLoading && _status!=value)
+                {
+                    HasError = false;
+                }
+                _status = value;
                 OnPropertyChanged();
             }
         }
@@ -140,6 +145,10 @@ namespace SPSync.Core.Metadata
                     }
                     else
                     {
+                        if (Status == ItemStatus.DeletedLocal)
+                        {
+                            Status= ItemStatus.UpdatedLocal;
+                        }
                         Logger.LogDebug(correlationId, Id, "(UpdateWithLocalInfo) Nothing to do");
                     }
 

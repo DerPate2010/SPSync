@@ -191,7 +191,7 @@ namespace SPSync.Core
                         {
                             string fullPath = driveLetter + Path.Combine(path, usnEntry.Name);
                             if (fullPath.ToLowerInvariant().StartsWith(_localFolder.ToLowerInvariant()) &&
-                                !fullPath.Contains(".spsync"))
+                                !fullPath.Contains(".spsync") && !FitsOneOfMultipleMasks(usnEntry.Name, _metadataStore.IgnorePattern))
                             {
                                 if (usnEntry.Reason.HasFlag(Win32Api.UsnReason.RENAME_NEW_NAME))
                                 {
@@ -234,7 +234,9 @@ namespace SPSync.Core
                                ": " + e.ToString());
                 }
             }
-            changes.ForEach(c => Debug.WriteLine($"{c.ChangeType} {c.Path} {c.FileRefNumber}"));
+            changes.ForEach(c => Debug.WriteLine($"{c.FileRefNumber};{c.ChangeType};{c.Path};{c.NewPath};"));
+            //usnEntries.ForEach(c => Debug.WriteLine($"{c.FileReferenceNumber};{c.Reason};{c.Name};{c.OldName};{c.ParentFileReferenceNumber};"));
+            //var oidc = usnEntries.Where(u => u.Reason.HasFlag(Win32Api.UsnReason.OBJECT_ID_CHANGE));
 
             foreach (var change in changes)
             {
@@ -717,7 +719,6 @@ namespace SPSync.Core
                                         continue;
                                     var newFolder = _localFolder + remoteItem.FullFileName.Substring(1);
                                     itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, newFolder);
-                                    itemInFolder.HasError = true;
                                 }
                             }
                         }
@@ -735,7 +736,6 @@ namespace SPSync.Core
                                         continue;
                                     var newFolder = _localFolder + remoteItem.FullFileName.Substring(1);
                                     itemInFolder.LocalFolder = itemInFolder.LocalFolder.Replace(item.LocalFile, newFolder);
-                                    itemInFolder.HasError = true;
                                 }
                             }
                         }
