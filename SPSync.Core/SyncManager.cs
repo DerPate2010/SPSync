@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Linq;
 using System.Text;
 using System.IO;
@@ -396,23 +397,23 @@ namespace SPSync.Core
             _syncTask  = Task.Run(()=>SyncInternal(_syncCancellation.Token));
         }
 
-        private void SyncInternal(CancellationToken cancellation)
+        private async Task SyncInternal(CancellationToken cancellation)
         {
             while (!cancellation.IsCancellationRequested)
             {
-                RunSynchronizationInternal(cancellation);
+                await RunSynchronizationInternal(cancellation);
                 _syncEvent.WaitOne();
             }
         }
 
-        public void RunSynchronizationInternal(CancellationToken cancellation)
+        public async Task RunSynchronizationInternal(CancellationToken cancellation)
         {
             try
             {
                 OnSyncProgress(0, ProgressStatus.Analyzing);
 
                 var countChanged = _metadataStore.GetItemsToProcess();
-                SyncChanges(countChanged, cancellation);
+                await SyncChanges(countChanged, cancellation);
 
                 OnSyncProgress(100, ProgressStatus.Completed);
             }
@@ -430,44 +431,6 @@ namespace SPSync.Core
                 Logger.Log("An error has occured: " + ex.ToString());
                 OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
             }
-        }
-
-        private int Synchronize(bool reviewOnly = false, bool rescanLocalFiles = true)
-        {
-            var countChanged = 1;
-
-            lock (this)
-            {
-                OnSyncProgress(0, ProgressStatus.Analyzing);
-
-                try
-                {
-                    BuildMetadataStore(_configuration.ConflictHandling, CancellationToken.None, rescanLocalFiles);
-                    countChanged = _metadataStore.GetItemsToProcess();
-
-                    if (reviewOnly || countChanged < 1)
-                    {
-                        OnSyncProgress(100, ProgressStatus.Completed);
-                        return countChanged;
-                    }
-
-                    SyncChanges(countChanged, CancellationToken.None);
-
-                    OnSyncProgress(100, ProgressStatus.Completed);
-                }
-                catch (Exception ex)
-                {
-                    //todo:
-                    if (_configuration.AuthenticationType == AuthenticationType.ADFS) //&& ex is webexception 403
-                    {
-                        Adfs.AdfsHelper.InValidateCookie();
-                    }
-                    OnSyncProgress(100, ProgressStatus.Error, "An error has occured: " + ex.Message, ex);
-                    return -1;
-                }
-            }
-
-            return countChanged;
         }
 
         public void SynchronizeLocalFileChange(string fullPath, FileChangeType changeType, string oldFullPath)
@@ -764,70 +727,26 @@ namespace SPSync.Core
             }
         }
 
-        private void SyncChanges(int countChanged, CancellationToken cancellation)
+        private async Task SyncChanges(int countChanged, CancellationToken cancellation)
         {
 
             var syncToRemote = (_configuration.Direction == SyncDirection.LocalToRemote || _configuration.Direction == SyncDirection.Both);
             var syncToLocal = _configuration.Direction == SyncDirection.RemoteToLocal || _configuration.Direction == SyncDirection.Both;
 
             int countProcessed=0;
-            MetadataItem item;
-            while (!cancellation.IsCancellationRequested && _metadataStore.GetNextItemToProcess(out item))
+            int numberToProcess;
+            if (!int.TryParse(ConfigurationManager.AppSettings["SyncThreads"], out numberToProcess))
+                numberToProcess = 1;
+            List<MetadataItem> items;
+            while (!cancellation.IsCancellationRequested && _metadataStore.GetNextItemsToProcess(numberToProcess,out items))
             {
-                countProcessed++;
-                OnSyncProgress((int)(((double)countProcessed / (double)countChanged) * 100),
-                    ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
-                Logger.LogDebug("Sync item: " + GetLogMessage(item));
-                try
+                var tasks = new List<Task>();
+                foreach (var item in items)
                 {
-
-                    if (FitsOneOfMultipleMasks(item.Name, _metadataStore.IgnorePattern))
-                    {
-                        item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
-                        continue;
-                    }
-
-                    bool itemToDelete = false;
-                    if (item.Type == ItemType.Folder)
-                    {
-                        ProcessFolder(item, syncToRemote, syncToLocal, out itemToDelete);
-                    }
-                    else if (item.Type == ItemType.File)
-                    {
-                        ProcessFile(item, syncToRemote, syncToLocal, out itemToDelete);
-                    }
-                    if (itemToDelete)
-                    {
-                        _metadataStore.Delete(item.Id);
-                    }
-                    else
-                    {
-                        if (item.Status != ItemStatus.Unchanged)
-                        {
-                            item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
-                        }
-                    }
-
+                    countProcessed++;
+                    tasks.Add(Task.Run(()=>SyncChanges_Item(countChanged, countProcessed, item, syncToRemote, syncToLocal), cancellation));
                 }
-                catch (Exception e)
-                {
-                    Logger.Log("Error processing item " + item.Id + ": " + e);
-                }
-                finally
-                {
-                    try
-                    {
-                        if (item.Status != ItemStatus.Unchanged)
-                        {
-                            item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
-                        }
-                    }
-                    catch (Exception e2)
-                    {
-                        Logger.Log("Cannot postpone item " + item.Id + ": " + e2);
-                    }
-
-                }
+                await Task.WhenAll(tasks);
             }
             
             OnSyncProgress(90, ProgressStatus.Running, "Finalizing...");
@@ -835,6 +754,61 @@ namespace SPSync.Core
             _metadataStore.ResetPostponed();
 
             _metadataStore.Save();
+        }
+
+        private void SyncChanges_Item(int countChanged, int countProcessed, MetadataItem item, bool syncToRemote,
+            bool syncToLocal)
+        {
+            OnSyncProgress((int) (((double) countProcessed / (double) countChanged) * 100),
+                ProgressStatus.Running, string.Format("{1} {0}...", item.Name, GetLogMessage(item)));
+            Logger.LogDebug("Sync item: " + GetLogMessage(item));
+            try
+            {
+                if (FitsOneOfMultipleMasks(item.Name, _metadataStore.IgnorePattern))
+                {
+                    item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                    return;
+                }
+
+                bool itemToDelete = false;
+                if (item.Type == ItemType.Folder)
+                {
+                    ProcessFolder(item, syncToRemote, syncToLocal, out itemToDelete);
+                }
+                else if (item.Type == ItemType.File)
+                {
+                    ProcessFile(item, syncToRemote, syncToLocal, out itemToDelete);
+                }
+                if (itemToDelete)
+                {
+                    _metadataStore.Delete(item.Id);
+                }
+                else
+                {
+                    if (item.Status != ItemStatus.Unchanged)
+                    {
+                        item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Log("Error processing item " + item.Id + ": " + e);
+            }
+            finally
+            {
+                try
+                {
+                    if (item.Status != ItemStatus.Unchanged)
+                    {
+                        item.Status = item.Status + MetadataStore.POSTPONE_OFFSET;
+                    }
+                }
+                catch (Exception e2)
+                {
+                    Logger.Log("Cannot postpone item " + item.Id + ": " + e2);
+                }
+            }
         }
 
         private bool FitsOneOfMultipleMasks(string fileName, string[] fileMasks)

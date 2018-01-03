@@ -386,17 +386,28 @@ namespace SPSync.Core.Metadata
             MetadataItemDb itemDb;
             lock (_lock)
             {
-              itemDb = _db.MetadataStore.OrderByDescending(m=>m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged && 
-              //p.HasError == 0 && 
-              p.Status<1000);
-                if (itemDb != null && itemDb.Status.GetValueOrDefault() == (long) ItemStatus.Unchanged)
+                itemDb = _db.MetadataStore.OrderByDescending(m => m.LastModified).FirstOrDefault(p => p.Status != (long)ItemStatus.Unchanged &&
+                  //p.HasError == 0 && 
+                  p.Status < 1000);
+                if (itemDb != null && itemDb.Status.GetValueOrDefault() == (long)ItemStatus.Unchanged)
                 {
                     Load();
                 }
-                
+
             }
             item = ToMetadataItem(itemDb);
             return item != null;
+        }
+        public bool GetNextItemsToProcess(int number, out List<MetadataItem> items)
+        {
+            lock (_lock)
+            {
+                var itemsDb = _db.MetadataStore.OrderByDescending(m => m.LastModified).Where(p => p.Status != (long)ItemStatus.Unchanged &&
+                  //p.HasError == 0 && 
+                  p.Status < 1000).Take(number).ToList();
+                items = itemsDb.Select(ToMetadataItem).ToList();
+                return items.Any();
+            }
         }
         public int GetItemsToProcess()
         {
